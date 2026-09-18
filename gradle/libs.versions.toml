@@ -28,6 +28,18 @@ assertj-core = { module = "org.assertj:assertj-core" }
 # kotlin-test 显式锁到与编译器同版（同源于 version.ref = kotlin），避免 BOM 与实际编译版本错位
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 
+# --- 服务端运行时依赖（M0-02 起）：全部由 BOM 平台约束版本，故不带 version.ref ---
+# 口径核对（Boot 4.1.1 官方迁移指南）：Boot 4 起 spring-boot-starter-web 已改名 spring-boot-starter-webmvc；
+# jdbc/validation 等 starter 名沿用；测试侧经典聚合器是 spring-boot-starter-test-classic 兜底件。
+spring-boot-starter-webmvc = { module = "org.springframework.boot:spring-boot-starter-webmvc" }
+spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc" }
+spring-boot-starter-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
+# 传统 @SpringBootTest / MockMvc / AssertJ 聚合测试件（Boot 4 的 classic 兜底 starter）
+spring-boot-starter-test-classic = { module = "org.springframework.boot:spring-boot-starter-test-classic" }
+# 双库 JDBC 驱动（版本由 Boot BOM 统一管理；M0-02 仅装配连接，不写 SQL）
+postgresql = { module = "org.postgresql:postgresql" }
+mysql-connector-j = { module = "com.mysql:mysql-connector-j" }
+
 [bundles]
 # 全模块通用的单元测试栈（L1 纯函数单测的地基）
 unit-test = ["junit-jupiter", "assertj-core", "kotlin-test"]

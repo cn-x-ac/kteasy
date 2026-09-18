@@ -21,10 +21,29 @@ plugins {
 
 description = "Kteasy 服务端：Spring Boot 装配 + REST 层（唯一常驻进程）"
 
-// 启动类与双数据源装配属 M0-02；本卡只保证可构建，故 bootJar 由约定插件暂时关闭
+// M0-02：本模块落地启动类与双数据源装配。
+// Boot 4 起不再自动应用 io.spring.dependency-management，运行期版本对齐同样靠 platform(BOM)。
 dependencies {
     implementation(projects.kteasyCore)
+    implementation(platform(libs.spring.boot.dependencies))
+    implementation(libs.spring.boot.starter.webmvc)
+    implementation(libs.spring.boot.starter.jdbc)
+    implementation(libs.spring.boot.starter.validation)
+    // 双库驱动随包装配（M0-02 只连不改数据，SQL 归 query/schema 模块）
+    runtimeOnly(libs.postgresql)
+    runtimeOnly(libs.mysql.connector.j)
+
     testImplementation(platform(libs.spring.boot.dependencies))
+    testImplementation(libs.spring.boot.starter.test.classic)
     testImplementation(libs.bundles.unit.test)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
+
+// 有主类后打开 bootJar、关掉普通 jar：约定插件默认对可运行模块关闭 bootJar，
+// 是为了 M0-01「无主类仍可构建」；本卡启动类落地，故在此模块级覆盖回来（后配置者生效）。
+springBoot {
+    mainClass.set("cn.x.ac.kteasy.server.KteasyApplication")
+}
+
+tasks.matching { it.name == "bootJar" }.configureEach { enabled = true }
+tasks.matching { it.name == "jar" }.configureEach { enabled = false }

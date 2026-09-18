@@ -1,0 +1,40 @@
+# --- Gradle ---
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+.kotlin/
+ktfs/
+
+# --- IDE ---
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+out/
+# IntelliJ 对 Kotlin 的本地编译产物
+generated/
+
+# --- 运行期数据目录（{dataDir}：附件、导入 trace、缓存，永不入库）---
+dataDir/
+*_files/
+
+# --- 本地环境与密钥（compose/.env 只交 .env.example）---
+.env
+.env.local
+*.local
+
+# --- 前端（M6：管理端/用户端 SPA 构建产物与依赖）---
+node_modules/
+dist/
+*.tsbuildinfo
+
+# --- 系统与日志 ---
+*.log
+hs_err_pid*
+replay_pid*
+.DS_Store
+Thumbs.db

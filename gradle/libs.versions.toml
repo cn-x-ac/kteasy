@@ -39,6 +39,11 @@ spring-boot-starter-test-classic = { module = "org.springframework.boot:spring-b
 # 双库 JDBC 驱动（版本由 Boot BOM 统一管理；M0-02 仅装配连接，不写 SQL）
 postgresql = { module = "org.postgresql:postgresql" }
 mysql-connector-j = { module = "com.mysql:mysql-connector-j" }
+# Flyway（数据库版本迁移工具，M0-03，只管引擎自身）：Boot 4 starter；
+# Flyway 10 把 PostgreSQL 与 MySQL 的支持从核心模块拆成独立模块，两库都要各带一个。
+spring-boot-starter-flyway = { module = "org.springframework.boot:spring-boot-starter-flyway" }
+flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql" }
+flyway-mysql = { module = "org.flywaydb:flyway-mysql" }
 
 [bundles]
 # 全模块通用的单元测试栈（L1 纯函数单测的地基）

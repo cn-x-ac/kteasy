@@ -29,9 +29,14 @@ dependencies {
     implementation(libs.spring.boot.starter.webmvc)
     implementation(libs.spring.boot.starter.jdbc)
     implementation(libs.spring.boot.starter.validation)
+    // M0-03：Flyway 迁移引擎自身库（只管 kteasy/md 区，不碰租户动态表）
+    implementation(libs.spring.boot.starter.flyway)
     // 双库驱动随包装配（M0-02 只连不改数据，SQL 归 query/schema 模块）
     runtimeOnly(libs.postgresql)
     runtimeOnly(libs.mysql.connector.j)
+    // Flyway 10 分库支持模块：PG 与 MySQL 各一，运行期按 Profile 选中的方言生效
+    runtimeOnly(libs.flyway.database.postgresql)
+    runtimeOnly(libs.flyway.mysql)
 
     testImplementation(platform(libs.spring.boot.dependencies))
     testImplementation(libs.spring.boot.starter.test.classic)

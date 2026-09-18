@@ -32,13 +32,15 @@ jobs:
           ./gradlew --no-daemon spotlessCheck
           ./gradlew --no-daemon -p build-logic spotlessCheck
 
-      - name: 防污染扫描 · 禁止上游源码/文案痕迹
-        # 词表外置于 config/compliance/forbidden-terms.txt（固定字符串匹配 -F）；
-        # 该文件自身必然含词表，故 --exclude 掉它。命中即失败。正式门禁与提交历史扫描见 M0-03。
+      - name: 防污染扫描 · 禁止上游源码/文案痕迹（工作树）
+        # 词表外置于 config/compliance/forbidden-terms.txt（固定串 -F）；M0-03 起词表已扩容，具体条目只存活在该文件里，
+        # 本步与门禁定义均不复述词表字面量（否则扫描命中自身）。
+        # 词表文件自身与 README/NOTICE（允许提及参照实现之名）由 --exclude 排除；命中即失败。
+        # 提交历史全量扫描属 1.0.0 发布门（【框架文档 04】§4），不在本步。
         run: |
           TERMS=config/compliance/forbidden-terms.txt
           ! grep -riIF -f <(grep -v '^[[:space:]]*#' "$TERMS") \
-            --exclude=forbidden-terms.txt \
+            --exclude=forbidden-terms.txt --exclude=README.md --exclude=NOTICE \
             --exclude-dir=.git --exclude-dir=.gradle --exclude-dir=build .
 
       - name: 构建与单元测试
@@ -102,5 +104,8 @@ jobs:
         with:
           cache-read-only: false
 
-      - name: JDBC 探活冒烟（真连本 dialect 的库，校验驱动/产品与方言一致 + 虚拟线程并发取连接）
-        run: ./gradlew --no-daemon :kteasy-server:test --tests "cn.x.ac.kteasy.server.DataSourceProbeSmokeTest"
+      - name: 双库启动 smoke（Flyway V1/V2 迁移 + 列类型映射 + JDBC 探活并发）
+        run: |
+          ./gradlew --no-daemon :kteasy-server:test \
+            --tests "cn.x.ac.kteasy.server.FlywayMigrationsTest" \
+            --tests "cn.x.ac.kteasy.server.DataSourceProbeSmokeTest"

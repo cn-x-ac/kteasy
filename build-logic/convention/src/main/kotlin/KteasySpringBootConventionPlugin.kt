@@ -29,6 +29,10 @@ class KteasySpringBootConventionPlugin : Plugin<Project> {
     override fun apply(target: Project): Unit =
         with(target) {
             pluginManager.apply("org.springframework.boot")
+            // kotlin-spring（all-open 的 Spring 预设）：@Component/@Repository/@Service 等注解类
+            // 自动去 final——@Repository 会被持久化异常翻译 PostProcessor 做 CGLIB 代理，
+            // final 类直接启动失败（M1-01 实测）。core 模块不走本插件，保持纯库。
+            pluginManager.apply("org.jetbrains.kotlin.plugin.spring")
 
             pluginManager.withPlugin("org.springframework.boot") {
                 tasks.matching { it.name == "bootJar" }.configureEach {

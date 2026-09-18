@@ -31,6 +31,7 @@ dependencies {
     // 约定插件在运行期需要这些插件的实现类，故用 implementation（不是 compileOnly）
     implementation(libs.kotlin.gradle.plugin)
     implementation(libs.spring.boot.gradle.plugin)
+    implementation(libs.kotlin.spring.gradle.plugin) // kotlin-spring=allopen 预设，@Repository 代理必需
     implementation(libs.spotless.plugin.gradle)
 }
 

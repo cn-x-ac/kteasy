@@ -1,7 +1,7 @@
 name: verify
 
-# M0-01 只落地「可构建 + 合规骨架」这一段；双库矩阵与完整门禁链（提交历史扫描、
-# L2 双库集成、ArchUnit、覆盖率地板）由 M0-02 / M0-03 按【框架文档 02】§3 接入。
+# 门禁链：M0-01 落地「可构建 + 合规骨架 + 最小防污染」；M0-02 补双库 service-matrix（boot-smoke，
+# 真连 PG/MySQL 验方言与探活）。提交历史扫描、ArchUnit、覆盖率地板、Flyway 双库迁移仍归 M0-03【框架文档 02】§3。
 on:
   push:
     branches: [main]
@@ -51,3 +51,56 @@ jobs:
           name: reports
           path: "**/build/reports/**"
           if-no-files-found: ignore
+
+  # M0-02 双库矩阵的运行时证据：本机无 Docker，故真连 PG/MySQL 的启动探活交给 CI service-matrix。
+  # 这是「干净环境判定」纪律的落地（M0-01：本机绿不算绿）——DataSourceProbeSmokeTest 仅在 KTEASY_IT_DB=true 时启用。
+  boot-smoke:
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        dialect: [pg, mysql]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: kteasy
+          POSTGRES_USER: kteasy
+          POSTGRES_PASSWORD: kteasy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kteasy -d kteasy"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: kteasy
+          MYSQL_USER: kteasy
+          MYSQL_PASSWORD: kteasy
+          MYSQL_ROOT_PASSWORD: rootpass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -prootpass"
+          --health-interval 5s --health-timeout 5s --health-retries 24
+    env:
+      SPRING_PROFILES_ACTIVE: ${{ matrix.dialect }}
+      KTEASY_IT_DB: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: JDBC 探活冒烟（真连本 dialect 的库，校验驱动/产品与方言一致 + 虚拟线程并发取连接）
+        run: ./gradlew --no-daemon :kteasy-server:test --tests "cn.x.ac.kteasy.server.DataSourceProbeSmokeTest"

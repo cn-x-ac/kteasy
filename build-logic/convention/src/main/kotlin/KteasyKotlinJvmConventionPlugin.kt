@@ -18,6 +18,8 @@ import org.gradle.api.Project
 import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+import org.gradle.api.tasks.testing.logging.TestLogEvent
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.withType
@@ -47,6 +49,12 @@ class KteasyKotlinJvmConventionPlugin : Plugin<Project> {
 
             tasks.withType<Test>().configureEach {
                 useJUnitPlatform()
+                // 失败时打全量异常（含 AssertJ 的 expected/but was 差异），便于在 CI 日志直接定位断言真值；
+                // 刻意不开 showStandardStreams——否则每个 context 测试的 Spring 启动日志会灌满控制台。
+                testLogging {
+                    events(TestLogEvent.FAILED)
+                    exceptionFormat = TestExceptionFormat.FULL
+                }
             }
         }
 

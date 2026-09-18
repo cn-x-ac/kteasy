@@ -30,7 +30,10 @@ import java.util.concurrent.Executors
  * 让 Tomcat 每请求跑在虚拟线程上。主断言是确定性「全 200」；线程维度做近似回归：本 JVM 内平台线程数
  * 的增量远小于并发量级（≈核数量级），据此挡住「线程爆炸」回归，而非精确对账。
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["spring.flyway.enabled=false"],
+)
 @ActiveProfiles("pg")
 class HealthConcurrencyTest {
     @Autowired

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package cn.x.ac.kteasy.server
+package cn.x.ac.kteasy.server.web
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -21,30 +21,41 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.core.env.Environment
 import org.springframework.test.context.ActiveProfiles
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 
 /**
- * 验收①（mysql 侧）：同一套代码换 Profile，`/api/health` 报 `dialect=mysql`；
- * 连接串带 utf8mb4 + serverTimezone=UTC 存储约定。
+ * 验收：`POST /api/query` 占位端点端到端返回 HTTP 501 + 严格三键契约体（error_code=420 样例，M0-03 §5）。
+ *
+ * 与库无关，故关 Flyway；真起服真 HTTP，锁的就是「查询出口」的响应形状，供后续各卡对齐。
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = ["spring.flyway.enabled=false"],
 )
-@ActiveProfiles("mysql")
-class MysqlProfileHealthTest {
+@ActiveProfiles("pg")
+class ErrorContractWebTest {
     @Autowired
     lateinit var environment: Environment
 
+    private val client: HttpClient = HttpClient.newHttpClient()
+
     @Test
-    fun `mysql Profile 起服且 health 报 dialect=mysql`() {
-        val response = HealthClient.health(environment)
-        assertThat(response.status).isEqualTo(200)
-        assertThat(response.body)
-            .contains("\"dialect\":\"mysql\"")
-            .contains("\"status\":\"UP\"")
-        assertThat(environment.getProperty("kteasy.db.dialect")).isEqualTo("mysql")
-        assertThat(environment.getProperty("spring.datasource.url"))
-            .startsWith("jdbc:mysql:")
-            .contains("serverTimezone=UTC")
+    fun `api query 占位返回 501 且契约三键齐备`() {
+        val port = requireNotNull(environment.getProperty("local.server.port"))
+        val request =
+            HttpRequest
+                .newBuilder(URI.create("http://127.0.0.1:$port/api/query"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build()
+        val resp = client.send(request, HttpResponse.BodyHandlers.ofString())
+
+        assertThat(resp.statusCode()).isEqualTo(501)
+        assertThat(resp.body())
+            .contains("\"error_code\":420")
+            .contains("\"error_msg\":")
+            .contains("\"data\":")
     }
 }

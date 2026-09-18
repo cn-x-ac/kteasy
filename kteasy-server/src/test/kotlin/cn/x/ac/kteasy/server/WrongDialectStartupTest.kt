@@ -60,7 +60,7 @@ class WrongDialectStartupTest {
                 context =
                     SpringApplicationBuilder(KteasyApplication::class.java)
                         .web(WebApplicationType.NONE)
-                        .run(*args)
+                        .run(*arrayOf("--spring.flyway.enabled=false") + args)
             }
         } finally {
             context?.close()

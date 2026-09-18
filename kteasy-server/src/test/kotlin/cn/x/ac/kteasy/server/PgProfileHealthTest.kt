@@ -28,7 +28,10 @@ import org.springframework.test.context.ActiveProfiles
  * 不连真库也能起（Hikari 启动期不建连），health 不触库；方言由 Profile 显式映射，
  * 因此本测验证的是「Profile → 方言 → 响应体」这条装配链，而非数据可达性（探活见 CI service-matrix）。
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["spring.flyway.enabled=false"],
+)
 @ActiveProfiles("pg")
 class PgProfileHealthTest {
     @Autowired

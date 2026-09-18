@@ -30,6 +30,15 @@
 
 - **后端框架大版本：Spring Boot 3.x → 4.x**（2026-09-18 决策）。落地基线 Boot 4.1.1 / Kotlin 2.3.21
   （取 BOM 锁定版）/ Gradle 8.14.5（官方支持面内）。版本单一来源使该项一行可回退。
+- **署名邮箱口径统一为 `master@x-ac.cn`**（2026-09-18，替换此前使用的个人邮箱锚）。覆盖版权头模板与全部源码文件头、
+  `NOTICE`、`README`、`SECURITY`、`CONTRIBUTING`、Issue 表单联系项；提交身份（author 与 committer）随之统一，
+  并用 ed25519 key（UID 同为 `master@x-ac.cn`）对全部提交签名——GitHub 侧 `verified=true`。
+  动因：GitHub 的 Verified 判定要求"签名密钥 UID 邮箱 == 提交 committer 邮箱"。
+- **合规门禁修复两处"看着在管其实没管"**：① `java{}` 步骤的 `licenseHeader` 空转（删掉 `package-info.java`
+  的版权头不报错）→ 改为与 `*.kts` 同语义的纯文本 `format("javaFiles")` 步骤；② 只改版权头模板时
+  spotless 任务被判 UP-TO-DATE 不重跑（`licenseHeaderFile` 只记路径）→ 配置期读入内容传参，模板变更必重跑。
+  另：定位正则外置为 `config/spotless/header-delimiter.txt`（避免三处副本漂移），`build-logic` 根目录的
+  `*.kts` 也纳入校验（此前是覆盖盲区）。
 
 ### 说明
 

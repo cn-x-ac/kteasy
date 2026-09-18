@@ -1,0 +1,51 @@
+name: verify
+
+# M0-01 只落地「可构建 + 合规骨架」这一段；双库矩阵与完整门禁链（防污染正式实现、
+# L2 双库集成、ArchUnit、覆盖率地板）由 M0-02 / M0-03 按【框架文档 02】§3 接入。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: 合规门禁 · 版权头与代码风格（主构建 + build-logic 独立构建）
+        run: |
+          ./gradlew --no-daemon spotlessCheck
+          ./gradlew --no-daemon -p build-logic spotlessCheck
+
+      - name: 防污染扫描 · 禁止上游源码/文案痕迹（正式门禁实现见 M0-03）
+        run: |
+          ! grep -riIE "com\.rebuild|persist4j|getrebuild" \
+            --include='*.kt' --include='*.kts' --include='*.java' \
+            --include='*.yml' --include='*.yaml' --include='*.toml' --include='*.md' \
+            --exclude-dir=.git --exclude-dir=build .
+
+      - name: 构建与单元测试
+        run: ./gradlew --no-daemon build
+
+      - name: 上传构建报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: "**/build/reports/**"
+          if-no-files-found: ignore

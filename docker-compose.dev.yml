@@ -1,0 +1,89 @@
+# Kteasy 本地开发依赖栈（步骤卡 M0-02 §4）。
+# 一条命令拉起双库 + 对象存储；应用本身在宿主机用 `SPRING_PROFILES_ACTIVE=pg|mysql` 起服连它。
+#   docker compose -f docker-compose.dev.yml --env-file .env up -d
+# 端口/账号默认与 application-{pg,mysql}.yml、.env.example 对齐（改一处三处同步）。
+name: kteasy-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kteasy-pg
+    environment:
+      POSTGRES_DB: ${KTEASY_DB_NAME:-kteasy}
+      POSTGRES_USER: ${KTEASY_DB_USER:-kteasy}
+      POSTGRES_PASSWORD: ${KTEASY_DB_PASSWORD:-kteasy}
+    ports:
+      - "${KTEASY_DB_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KTEASY_DB_USER:-kteasy} -d ${KTEASY_DB_NAME:-kteasy}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mysql:
+    # MySQL 8.0（≥8.0.17，InnoDB 默认）；服务端字符集钉 utf8mb4，与 Profile 的存储约定一致。
+    image: mysql:8.0
+    container_name: kteasy-mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${KTEASY_MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${KTEASY_DB_NAME:-kteasy}
+      MYSQL_USER: ${KTEASY_DB_USER:-kteasy}
+      MYSQL_PASSWORD: ${KTEASY_DB_PASSWORD:-kteasy}
+    ports:
+      - "${KTEASY_DB_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${KTEASY_MYSQL_ROOT_PASSWORD:-rootpass}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  minio:
+    # 对象存储：桶保持私有、应用侧走 HTTPS（生产口径，见【全景】§3.5 集成）。
+    # 本地直连多为 http，故 kteasy.storage.https 在 dev 环境按需覆盖；bucket 首次由 init 容器创建为私有。
+    image: minio/minio:latest
+    container_name: kteasy-minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${KTEASY_S3_ACCESS_KEY:-kteasyadmin}
+      MINIO_ROOT_PASSWORD: ${KTEASY_S3_SECRET_KEY:-kteasysecret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # 一次性初始化：等 minio 就绪后建私有桶（默认策略不 public-read）。
+  minio-init:
+    image: minio/mc:latest
+    container_name: kteasy-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+        mc mb --ignore-existing local/$${KTEASY_BUCKET:-kteasy} &&
+        mc anonymous set none local/$${KTEASY_BUCKET:-kteasy}
+    environment:
+      MINIO_ROOT_USER: ${KTEASY_S3_ACCESS_KEY:-kteasyadmin}
+      MINIO_ROOT_PASSWORD: ${KTEASY_S3_SECRET_KEY:-kteasysecret}
+      KTEASY_BUCKET: ${KTEASY_S3_BUCKET:-kteasy}
+
+volumes:
+  pg-data:
+  mysql-data:
+  minio-data:

@@ -43,6 +43,29 @@ build-logic               Gradle 约定插件（构建配置单一来源）
 要求：JDK 21（其余由 Gradle toolchain 处理）。开发态双库与对象存储、起服与 `/api/health` 见 M0-02 交付的
 `docker-compose.dev.yml` 与本文档「部署」章节。
 
+## 开发环境（双库 + 对象存储）
+
+同一套代码靠 Profile 切换 PostgreSQL / MySQL；一条命令拉起本地依赖栈（pg16 / mysql8.0 / minio）。
+
+```bash
+cp .env.example .env                                   # 端口/账号按需改（默认已对齐各 Profile）
+docker compose -f docker-compose.dev.yml --env-file .env up -d   # 起 pg + mysql + minio（含私有桶初始化）
+docker compose -f docker-compose.dev.yml ps                   # 三容器应为 healthy
+
+SPRING_PROFILES_ACTIVE=pg ./gradlew :kteasy-server:bootRun   # 连 PG 起服
+# 或
+SPRING_PROFILES_ACTIVE=mysql ./gradlew :kteasy-server:bootRun # 连 MySQL 起服
+
+curl -s localhost:8080/api/health | jq                 # {status,version,dialect,capabilities,clock}
+```
+
+约定与红线：
+
+- **方言显式来自 Profile**，`kteasy.db.dialect` 与 `spring.datasource.url` 前缀必须匹配；连错库直接**启动失败并报错含方言名**，绝不静默降级到另一库（`DataSourceDialectGuard`）。
+- 应用未设默认 Profile——不显式选库即启动失败，杜绝「默认连某个库」。
+- `kteasy.storage.*`（对象存储）与 `kteasy.automation.js.enabled`（脚本层）本卡只留配置位，接线分别在 M5-03 / M3b。
+- 虚拟线程由 `spring.threads.virtual.enabled=true` 开启（JDK 21）。
+
 ## 数据与兼容口径
 
 - **PostgreSQL（recommended）**：参考实现，`ext` 走 JSONB + 表达式索引；

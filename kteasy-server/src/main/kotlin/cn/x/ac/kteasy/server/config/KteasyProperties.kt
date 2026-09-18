@@ -34,6 +34,9 @@ class KteasyProperties {
     var db: Db = Db()
 
     @NestedConfigurationProperty
+    var md: Md = Md()
+
+    @NestedConfigurationProperty
     var storage: Storage = Storage()
 
     @NestedConfigurationProperty
@@ -42,6 +45,26 @@ class KteasyProperties {
     /** 数据库方言配置：取值 pg | mysql，由 Profile 显式映射（见 application-*.yml）。 */
     class Db {
         var dialect: String = ""
+    }
+
+    /**
+     * 元数据治理面配置（M1-01）。
+     *
+     * `bootToken`：md 区治理 API 的临时鉴权令牌（M2 换真权限，代码留 TODO(M2)）。
+     * 留空 = 开发直通模式（启动打 WARN，仅限本地/受信环境；生产必须显式配置）。
+     *
+     * `cache.redisChannel`：跨节点失效总线通道名（【规格】§8-⑦：Redis pub/sub 预留）。
+     * 留空 = 单节点进程内失效（默关），多节点部署在后续卡接线。
+     */
+    class Md {
+        var bootToken: String = ""
+
+        @NestedConfigurationProperty
+        var cache: Cache = Cache()
+
+        class Cache {
+            var redisChannel: String = ""
+        }
     }
 
     /**

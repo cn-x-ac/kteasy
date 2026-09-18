@@ -31,6 +31,8 @@ dependencies {
     implementation(libs.spring.boot.starter.validation)
     // M0-03：Flyway 迁移引擎自身库（只管 kteasy/md 区，不碰租户动态表）
     implementation(libs.spring.boot.starter.flyway)
+    // M1-01：元数据图谱缓存（Caffeine 单飞加载，AFTER_COMMIT 失效）
+    implementation(libs.caffeine)
     // 双库驱动随包装配（M0-02 只连不改数据，SQL 归 query/schema 模块）
     runtimeOnly(libs.postgresql)
     runtimeOnly(libs.mysql.connector.j)

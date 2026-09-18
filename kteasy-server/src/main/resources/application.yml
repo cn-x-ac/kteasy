@@ -13,11 +13,19 @@ spring:
       # 真实连通性由 JDBC 探活冒烟测（CI 双库 service-matrix）验证，而非拖慢正常启动。
       initialization-fail-timeout: -1
       pool-name: kteasy-pool
+      # M1-01 并发验收（50 并发元数据写）实测默认 10 不够；写通道（M1-06）按对象加锁后该值即稳态上限
+      maximum-pool-size: 50
 
 # 引擎配置命名空间（全部经 KteasyProperties 类型安全绑定，禁散读 @Value）。
 kteasy:
   data-dir: ./kteasy-data
   # db.dialect 由 Profile 文件设置（pg | mysql）；此处不放默认值。
+  # md 区治理面（M1-01）：boot-token 留空 = 开发直通（启动 WARN，M2 换真权限）；
+  # cache.redis-channel 预留跨节点失效总线（单节点默关，多节点部署接线在后续卡）。
+  md:
+    boot-token: ${KTEASY_MD_BOOT_TOKEN:}
+    cache:
+      redis-channel: ${KTEASY_MD_CACHE_REDIS_CHANNEL:}
   storage:
     endpoint: ${KTEASY_S3_ENDPOINT:}
     bucket: ${KTEASY_S3_BUCKET:}

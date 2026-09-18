@@ -45,7 +45,7 @@ build-logic               Gradle 约定插件（构建配置单一来源）
 
 ## 开发环境（双库 + 对象存储）
 
-同一套代码靠 Profile 切换 PostgreSQL / MySQL；一条命令拉起本地依赖栈（pg16 / mysql8.0 / minio）。
+同一套代码靠 Profile 切换 PostgreSQL / MySQL；一条命令拉起本地依赖栈（pg18 / mysql9.7 LTS / minio）。
 
 ```bash
 cp .env.example .env                                   # 端口/账号按需改（默认已对齐各 Profile）
@@ -69,7 +69,7 @@ curl -s localhost:8080/api/health | jq                 # {status,version,dialect
 ## 数据与兼容口径
 
 - **PostgreSQL（recommended）**：参考实现，`ext` 走 JSONB + 表达式索引；
-- **MySQL 8.0.17+（supported）**：`ext` 走 JSON 列，能力差异以 capability 标志显式降级（不假装两边等价）；
+- **MySQL 9.7 LTS+（supported）**：`ext` 走 JSON 列，能力差异以 capability 标志显式降级（不假装两边等价）；
 - 自定义字段默认进 `ext`，加字段 = 元数据插一行 + 业务行多一个 key：**零 DDL、零锁表**；
 - 一切 blob 进对象存储（S3/MinIO），数据库只存引用。
 

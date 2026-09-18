@@ -43,8 +43,8 @@ body:
     id: db-version
     attributes:
       label: 数据库精确版本
-      description: 例：PG 16.4；MySQL 8.0.40（8.0.17 以下不在支持面）
-      placeholder: "MySQL 8.0."
+      description: 例：PG 18.6；MySQL 9.7.1（低于 PG 18 / MySQL 9.7 LTS 不在支持面）
+      placeholder: "MySQL 9.7."
     validations:
       required: true
   - type: dropdown

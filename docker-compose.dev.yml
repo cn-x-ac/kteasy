@@ -6,7 +6,7 @@ name: kteasy-dev
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: kteasy-pg
     environment:
       POSTGRES_DB: ${KTEASY_DB_NAME:-kteasy}
@@ -23,8 +23,8 @@ services:
       retries: 20
 
   mysql:
-    # MySQL 8.0（≥8.0.17，InnoDB 默认）；服务端字符集钉 utf8mb4，与 Profile 的存储约定一致。
-    image: mysql:8.0
+    # MySQL 9.7（LTS，InnoDB 默认）；服务端字符集钉 utf8mb4，与 Profile 的存储约定一致。
+    image: mysql:9.7
     container_name: kteasy-mysql
     command:
       - --character-set-server=utf8mb4

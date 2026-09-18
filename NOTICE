@@ -1,0 +1,14 @@
+Kteasy — Copyright 2026 阿杰很厉害 <506907958@qq.com>
+
+This product includes software developed by 阿杰很厉害 (contact: 506907958@qq.com).
+本项目与衍生分发必须保留上述署名（Apache License 2.0 的 NOTICE 机制）。
+
+版权与许可
+  - 本工程源码：Apache License 2.0（见 LICENSE），版权归属同上；
+  - 每个源码文件头部携带同一版权声明，SPDX 标识：Apache-2.0；
+  - 本引擎为从零实现的元数据驱动低代码引擎，不含任何第三方 copyleft（GPL/AGPL/LGPL）
+    成分的源码或文档文字；仅宽松许可（Apache-2.0 / BSD / MIT）依赖被引入。
+
+第三方依赖
+  - 各依赖的许可与署名以随分发件自带的 LICENSE/NOTICE 为准；
+  - CI 生成依赖许可报告（artifact），出现 copyleft 即门禁失败。

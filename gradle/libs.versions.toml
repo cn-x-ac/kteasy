@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# 单一版本来源：全仓依赖/插件版本只在此声明，模块 build.gradle.kts 内禁止出现版本号
+# 版本取证（2026-09-18 实测 Maven Central / Gradle Plugin Portal / Spring Boot 官方文档）
+#   - Spring Boot 4.1.1（4.x 线当前最新补丁）：官方 System Requirements = Java 17+（兼容至 26）、
+#     Gradle 8.x（8.14 及以后）与 9.x、Spring Framework 7.0.9
+#   - 其 BOM 锁定 kotlin.version=2.3.21、junit-jupiter.version=6.0.3、assertj.version=3.27.7
+#   - Gradle wrapper 固定 8.14.5（见 gradle/wrapper/gradle-wrapper.properties）
+# ---------------------------------------------------------------------------
+[versions]
+kotlin = "2.3.21"
+springBoot = "4.1.1"
+# 合规骨架：spotless 强制【规格】§1.4 版权头 + ktlint 统一 Kotlin 风格
+spotless = "8.10.2"
+ktlint = "1.8.0"
+
+[libraries]
+# --- build-logic 约定插件编译期需要的插件载体（模块内不引用） ---
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+spring-boot-gradle-plugin = { module = "org.springframework.boot:spring-boot-gradle-plugin", version.ref = "springBoot" }
+spotless-plugin-gradle = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
+
+# --- 运行时/测试依赖：不带版本，统一由 Spring Boot BOM 平台约束 ---
+# Spring Boot 4 不再自动应用 io.spring.dependency-management，故一律用 platform(BOM) 对齐版本
+spring-boot-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+assertj-core = { module = "org.assertj:assertj-core" }
+# kotlin-test 显式锁到与编译器同版（同源于 version.ref = kotlin），避免 BOM 与实际编译版本错位
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
+
+[bundles]
+# 全模块通用的单元测试栈（L1 纯函数单测的地基）
+unit-test = ["junit-jupiter", "assertj-core", "kotlin-test"]
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }

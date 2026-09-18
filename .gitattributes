@@ -1,0 +1,16 @@
+# 跨平台一致性：仓库内统一 LF，Windows 检出不回写 CRLF
+* text=auto eol=lf
+
+# 明确二进制与必须保留原行尾的脚本
+*.jar binary
+*.png binary
+*.jpg binary
+*.pdf binary
+gradlew text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+#  diff 友好
+*.md diff=markdown
+*.kt diff=kotlin
+*.java diff=java

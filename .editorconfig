@@ -1,0 +1,25 @@
+root = true
+
+# 统一换行与缩进：Windows 检出也不产生 CRLF 抖动（spotless / ktlint 同一口径）
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+max_line_length = off
+
+[*.{yml,yaml,json,toml,md}]
+indent_size = 2
+
+[*.properties]
+indent_size = 4
+
+# 版权头与 Apache-2.0 正文、生成物不做自动格式化
+[LICENSE]
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+[*.{bat,cmd}]
+end_of_line = crlf

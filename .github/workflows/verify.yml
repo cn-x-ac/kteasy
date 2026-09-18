@@ -1,6 +1,6 @@
 name: verify
 
-# M0-01 只落地「可构建 + 合规骨架」这一段；双库矩阵与完整门禁链（防污染正式实现、
+# M0-01 只落地「可构建 + 合规骨架」这一段；双库矩阵与完整门禁链（提交历史扫描、
 # L2 双库集成、ArchUnit、覆盖率地板）由 M0-02 / M0-03 按【框架文档 02】§3 接入。
 on:
   push:
@@ -32,12 +32,14 @@ jobs:
           ./gradlew --no-daemon spotlessCheck
           ./gradlew --no-daemon -p build-logic spotlessCheck
 
-      - name: 防污染扫描 · 禁止上游源码/文案痕迹（正式门禁实现见 M0-03）
+      - name: 防污染扫描 · 禁止上游源码/文案痕迹
+        # 词表外置于 config/compliance/forbidden-terms.txt（固定字符串匹配 -F）；
+        # 该文件自身必然含词表，故 --exclude 掉它。命中即失败。正式门禁与提交历史扫描见 M0-03。
         run: |
-          ! grep -riIE "com\.rebuild|persist4j|getrebuild" \
-            --include='*.kt' --include='*.kts' --include='*.java' \
-            --include='*.yml' --include='*.yaml' --include='*.toml' --include='*.md' \
-            --exclude-dir=.git --exclude-dir=build .
+          TERMS=config/compliance/forbidden-terms.txt
+          ! grep -riIF -f <(grep -v '^[[:space:]]*#' "$TERMS") \
+            --exclude=forbidden-terms.txt \
+            --exclude-dir=.git --exclude-dir=.gradle --exclude-dir=build .
 
       - name: 构建与单元测试
         run: ./gradlew --no-daemon build

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞报告
+    url: https://github.com/cn-x-ac/kteasy/security/advisories/new
+    about: 请勿开公开 Issue；也可按 SECURITY.md 直接邮件 master@x-ac.cn
+  - name: 许可与商用授权
+    url: mailto:master@x-ac.cn
+    about: Apache-2.0 之外的授权形态、署名与再分发问题

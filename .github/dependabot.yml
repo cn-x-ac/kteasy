@@ -1,0 +1,28 @@
+# 依赖升级走固定节奏、单独成 PR，不夹在功能改动里（见 libs.versions.toml 抬头注释）
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    groups:
+      kotlin-ecosystem:
+        patterns:
+          - org.jetbrains.kotlin*
+      spring-boot-ecosystem:
+        patterns:
+          - org.springframework*
+  - package-ecosystem: gradle
+    directory: /build-logic/
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

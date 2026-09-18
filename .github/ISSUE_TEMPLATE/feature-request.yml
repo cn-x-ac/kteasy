@@ -1,0 +1,60 @@
+name: 功能请求
+description: 新能力、能力增强或建模体验改进
+title: "[feat] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        引擎的能力面按里程碑推进（骨架 → 对象与数据 → 权限 → 自动化 → 审批与转换 → 周边 → 应用层）。
+        先想清楚：**这个能力属于引擎，还是属于某个业务对象？** 后者请放进示例业务，不要塞进 `kteasy-core`。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题
+      description: 谁在什么场景下做不到什么（用"对象/字段/自动化/审批/转换"这五个词描述最好）
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的做法
+      description: 建模动作、配置界面、运行期行为各是什么
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 现有绕法与其代价
+      placeholder: 例如：只能用两个对象拼，导致查询要手工关联、权限边界不清
+  - type: dropdown
+    id: compat
+    attributes:
+      label: 兼容面影响
+      description: 见 CHANGELOG.md 的分层承诺（物理结构 / 协议 / 宿主 API）
+      options:
+        - 纯新增，无兼容影响
+        - 影响协议（布局 JSON、EQL 文法、事件载荷、开放接口形状）
+        - 影响物理结构（对象数据表）
+        - 影响扩展点宿主 API
+        - 不确定
+    validations:
+      required: true
+  - type: textarea
+    id: dual-db
+    attributes:
+      label: 双库与方言
+      description: PostgreSQL 与 MySQL 都能做吗？若某边只能降级，降级后的语义差是什么（capability 标志叫什么）
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收（Given/When/Then）
+      value: |
+        Given
+        When
+        Then
+    validations:
+      required: true

@@ -1,0 +1,44 @@
+name: 使用咨询
+description: 怎么建模、为什么是这个结果、部署与容量问题
+title: "[question] "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提问前先看 README 的三条收口与文档目录。安全问题请走 `SECURITY.md` 里的邮件渠道，不要在这里提。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及范围
+      options:
+        - 建模（对象/字段/字典/选项集/布局）
+        - 查询（EQL、列表、仪表盘聚合）
+        - 写入与校验
+        - 自动化与公式
+        - 审批与记录转换
+        - 权限
+        - 部署与容量
+        - 构建与开发环境
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: 问题
+      description: 你要达成什么、卡在哪一步
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境
+      description: 引擎版本/commit、数据库类型与版本、部署形态（单机 compose / 多副本）
+      placeholder: |
+        引擎：0.1.0-SNAPSHOT / commit
+        数据库：PostgreSQL 16.4
+        部署：docker-compose 单机
+    validations:
+      required: true

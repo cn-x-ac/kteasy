@@ -1,0 +1,89 @@
+name: 缺陷报告
+description: 可复现的错误、双库结果不等价、崩溃或数据不一致
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先按 `CONTRIBUTING.md` 的三条收口自查一遍：**写走 data、读走 query、结构变更走 schema**。
+        数据一致性类缺陷请尽量给最小复现（一段对象/字段定义 + 一次写入或查询）。
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么
+      description: 期望行为 vs 实际行为
+      placeholder: 结论在前，细节在后
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: dropdown
+    id: db
+    attributes:
+      label: 数据库
+      description: 本引擎双库兼容，数据库是一等复现维度
+      options:
+        - PostgreSQL
+        - MySQL
+        - 两者都有
+        - 与数据库无关
+    validations:
+      required: true
+  - type: input
+    id: db-version
+    attributes:
+      label: 数据库精确版本
+      description: 例：PG 16.4；MySQL 8.0.40（8.0.17 以下不在支持面）
+      placeholder: "MySQL 8.0."
+    validations:
+      required: true
+  - type: dropdown
+    id: other-db
+    attributes:
+      label: 另一个库是否复现
+      options:
+        - 复现
+        - 不复现
+        - 未测
+    validations:
+      required: true
+  - type: input
+    id: engine-version
+    attributes:
+      label: 引擎版本 / commit
+      description: 版本号或 `git rev-parse --short HEAD`
+      placeholder: 0.1.0-SNAPSHOT / a1b2c3d
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 日志与证据
+      description: 含 traceId 的服务端日志、结构变更作业或导入 trace 的状态行（贴文本，不要只给截图）
+      render: shell
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: 影响面
+      options:
+        - label: 数据一致性（丢行、级联/聚合结果错、子项或关联差量错误）
+        - label: 权限可见性或可写性
+        - label: 崩溃后不可恢复（作业无法续跑）
+        - label: 双库结果不等价且未标注 capability
+        - label: 仅体验/外观
+  - type: checkboxes
+    id: pr
+    attributes:
+      label: 意愿
+      options:
+        - label: 我愿意提交 PR（请先读三条收口与许可边界）

@@ -1,0 +1,1 @@
+(?m)^(package|import|@|/\*\*|class|interface|enum|fun |val |var |plugins \{|settings|rootProject|pluginManagement|dependencyResolutionManagement|enableFeaturePreview|include\(|tasks\.|group =|version =|description =|dependencies \{|java \{|spotless \{|gradlePlugin \{)

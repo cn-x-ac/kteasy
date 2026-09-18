@@ -52,20 +52,21 @@ gradlePlugin {
 }
 
 // build-logic 是独立构建，主构建的 spotless 覆盖不到它，故在此自带合规校验。
-// CI 以 ./gradlew -p build-logic spotlessCheck 把关；版权头模板与主构建共用同一份文件。
-val licenseHeader = file("../../config/spotless/license-header.txt")
-val headerDelimiter = """(?m)^(package|import|@|/\*\*|class|interface|enum|fun |val |var |plugins \{|settings|rootProject|pluginManagement|dependencyResolutionManagement|enableFeaturePreview|include\(|tasks\.|group =|version =|description =|dependencies \{|java \{|spotless \{|gradlePlugin \{)"""
+// CI 以 ./gradlew -p build-logic spotlessCheck 把关；版权头模板与定位正则与主构建共用同一份文件。
+// 传"内容"而非路径：路径形式不会让任务在模板变更时失效重跑（实测门禁假绿）。
+val licenseHeader = file("../../config/spotless/license-header.txt").readText()
+val headerDelimiter = file("../../config/spotless/header-delimiter.txt").readText().trim()
 
 spotless {
     kotlin {
         target("src/**/*.kt")
-        licenseHeaderFile(licenseHeader, headerDelimiter)
+        licenseHeader(licenseHeader, headerDelimiter)
         ktlint(libs.versions.ktlint.get())
         endWithNewline()
     }
     format("gradleScripts") {
         target("*.kts")
-        licenseHeaderFile(licenseHeader, headerDelimiter)
+        licenseHeader(licenseHeader, headerDelimiter)
         trimTrailingWhitespace()
         endWithNewline()
     }

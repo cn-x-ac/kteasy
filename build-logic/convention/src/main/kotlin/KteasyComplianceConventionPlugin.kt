@@ -35,27 +35,33 @@ class KteasyComplianceConventionPlugin : Plugin<Project> {
 
             val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
             val ktlintVersion = libs.findVersion("ktlint").get().requiredVersion
-            val licenseHeader = File(rootProject.projectDir, LICENSE_HEADER_PATH)
+            // 注意：必须把"内容"传给 spotless，而不是文件路径。
+            // 实测 licenseHeaderFile(...) 只记路径 → 改模板文件不会让任务失效重跑，门禁假绿；
+            // 配置期读成字符串后，内容进入任务状态，模板一改必然重跑。
+            val licenseHeader = File(rootProject.projectDir, LICENSE_HEADER_PATH).readText()
+            val headerDelimiter = File(rootProject.projectDir, HEADER_DELIMITER_PATH).readText().trim()
             val hasSources = File(projectDir, "src").isDirectory
 
             extensions.configure<SpotlessExtension> {
                 if (hasSources) {
                     kotlin {
                         target("src/**/*.kt")
-                        licenseHeaderFile(licenseHeader, HEADER_DELIMITER)
+                        licenseHeader(licenseHeader, headerDelimiter)
                         ktlint(ktlintVersion)
                         endWithNewline()
                     }
-                    java {
+                    // 实测：java{} 步骤里的 licenseHeader 是空转的——删掉 package-info.java 的版权头，
+                    // spotlessJavaCheck 不报缺头（只报行尾）。改走与 *.kts 相同、语义可预期的纯文本 format 步骤。
+                    format("javaFiles") {
                         target("src/**/*.java")
-                        licenseHeaderFile(licenseHeader, HEADER_DELIMITER)
+                        licenseHeader(licenseHeader, headerDelimiter)
                         trimTrailingWhitespace()
                         endWithNewline()
                     }
                 }
                 format("gradleScripts") {
                     target("*.kts")
-                    licenseHeaderFile(licenseHeader, HEADER_DELIMITER)
+                    licenseHeader(licenseHeader, headerDelimiter)
                     trimTrailingWhitespace()
                     endWithNewline()
                 }
@@ -66,11 +72,9 @@ class KteasyComplianceConventionPlugin : Plugin<Project> {
         private const val LICENSE_HEADER_PATH = "config/spotless/license-header.txt"
 
         /**
-         * 版权头之后的正文起点。必须锚定行首，且不能被版权头自身匹配到：
-         * 版权头只含块注释起始符与星号对齐行，不含「块注释+星号」的 Javadoc 起始形式，
-         * 故下面这些候选项（含 Javadoc 起始与行首关键词）都是安全的。
+         * 版权头之后的正文起点（定位正则）。外置成数据文件而非内嵌常量：主构建、build-logic 根与
+         * convention 三处都要用同一份，写在代码里必然漂移；与模板一起登记为任务输入，改哪儿都会重跑。
          */
-        const val HEADER_DELIMITER =
-            """(?m)^(package|import|@|/\*\*|class|interface|enum|fun |val |var |plugins \{|settings|rootProject|pluginManagement|dependencyResolutionManagement|enableFeaturePreview|include\(|tasks\.|group =|version =|description =|dependencies \{|java \{|spotless \{|gradlePlugin \{)"""
+        private const val HEADER_DELIMITER_PATH = "config/spotless/header-delimiter.txt"
     }
 }

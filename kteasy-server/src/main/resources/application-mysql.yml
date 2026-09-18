@@ -1,0 +1,12 @@
+# Profile=mysql：MySQL 方言。存储约定 utf8mb4 + serverTimezone=UTC（rebuild 的 mysql_native_password 教训不继承）。
+# kteasy.db.dialect 与 spring.datasource.url 前缀必须一致，否则启动即失败（禁静默降级到另一库）。
+kteasy:
+  db:
+    dialect: mysql
+
+spring:
+  datasource:
+    url: "jdbc:mysql://${KTEASY_DB_HOST:localhost}:${KTEASY_DB_PORT:3306}/${KTEASY_DB_NAME:kteasy}?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&serverTimezone=UTC"
+    username: ${KTEASY_DB_USER:kteasy}
+    password: ${KTEASY_DB_PASSWORD:kteasy}
+    driver-class-name: com.mysql.cj.jdbc.Driver

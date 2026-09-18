@@ -1,0 +1,12 @@
+# Profile=pg：PostgreSQL 方言。 kteasy.db.dialect 与 spring.datasource.url 前缀必须一致，
+# 否则 DataSourceDialectGuard 启动即失败（禁静默降级到另一库）。
+kteasy:
+  db:
+    dialect: pg
+
+spring:
+  datasource:
+    url: "jdbc:postgresql://${KTEASY_DB_HOST:localhost}:${KTEASY_DB_PORT:5432}/${KTEASY_DB_NAME:kteasy}"
+    username: ${KTEASY_DB_USER:kteasy}
+    password: ${KTEASY_DB_PASSWORD:kteasy}
+    driver-class-name: org.postgresql.Driver

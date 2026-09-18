@@ -10,3 +10,9 @@ spring:
     username: ${KTEASY_DB_USER:kteasy}
     password: ${KTEASY_DB_PASSWORD:kteasy}
     driver-class-name: org.postgresql.Driver
+  # Flyway 只管引擎自身（S8），按方言分目录；PG 用独立 schema：迁移历史落 kteasy schema。
+  flyway:
+    locations: classpath:db/migration/pg
+    schemas: kteasy
+    default-schema: kteasy
+    table: flyway_schema_history

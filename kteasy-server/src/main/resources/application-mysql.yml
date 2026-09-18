@@ -1,4 +1,4 @@
-# Profile=mysql：MySQL 方言。存储约定 utf8mb4 + serverTimezone=UTC（rebuild 的 mysql_native_password 教训不继承）。
+# Profile=mysql：MySQL 方言。存储约定 utf8mb4 + serverTimezone=UTC（旧实现的 mysql_native_password 教训不继承）。
 # kteasy.db.dialect 与 spring.datasource.url 前缀必须一致，否则启动即失败（禁静默降级到另一库）。
 kteasy:
   db:
@@ -10,3 +10,7 @@ spring:
     username: ${KTEASY_DB_USER:kteasy}
     password: ${KTEASY_DB_PASSWORD:kteasy}
     driver-class-name: com.mysql.cj.jdbc.Driver
+  # Flyway 只管引擎自身（S8），按方言分目录；MySQL 历史表用 kteasy_ 前缀（无独立 schema 概念）。
+  flyway:
+    locations: classpath:db/migration/mysql
+    table: kteasy_flyway_schema_history

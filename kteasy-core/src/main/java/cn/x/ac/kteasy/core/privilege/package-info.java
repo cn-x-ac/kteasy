@@ -13,6 +13,5 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 /** 权限：操作×层级矩阵、条件权限、字段权限与多角色合并 */
 package cn.x.ac.kteasy.core.privilege;

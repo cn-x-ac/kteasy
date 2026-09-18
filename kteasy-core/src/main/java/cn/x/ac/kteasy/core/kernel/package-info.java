@@ -13,6 +13,5 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 /** 内核：事务边界、缓存失效、配置装配、时钟与锁抽象 */
 package cn.x.ac.kteasy.core.kernel;

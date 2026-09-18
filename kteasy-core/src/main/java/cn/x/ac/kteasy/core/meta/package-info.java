@@ -13,6 +13,5 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 /** 对象与字段元数据：对象定义、字段注册表、字典、选项集、布局与元数据缓存 */
 package cn.x.ac.kteasy.core.meta;

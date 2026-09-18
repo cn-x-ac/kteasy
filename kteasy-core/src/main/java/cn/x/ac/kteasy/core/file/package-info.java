@@ -13,6 +13,5 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 /** 附件与文件：对象存储引用、分享令牌与附件权限 */
 package cn.x.ac.kteasy.core.file;

@@ -13,6 +13,5 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 /** 通知总线：事件订阅与站内/邮件/短信/三方渠道适配器 */
 package cn.x.ac.kteasy.core.notify;

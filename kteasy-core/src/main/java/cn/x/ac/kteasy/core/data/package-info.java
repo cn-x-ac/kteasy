@@ -13,6 +13,5 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 /** 通用写入通道：校验、字段规范化、写入守卫与写锁（写的唯一入口） */
 package cn.x.ac.kteasy.core.data;

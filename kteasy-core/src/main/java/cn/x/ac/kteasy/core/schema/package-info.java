@@ -13,6 +13,5 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 /** 物化引擎：结构变更作业状态机、方言 SPI、命名空间映射与能力标志 */
 package cn.x.ac.kteasy.core.schema;

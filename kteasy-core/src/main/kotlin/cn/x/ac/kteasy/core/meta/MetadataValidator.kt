@@ -16,7 +16,7 @@
 package cn.x.ac.kteasy.core.meta
 
 /**
- * md 区保存校验链（模块图纸 01 §3：api_name 合法性 → 类型×存储矩阵 → 名称字段资格 →
+ * md 区保存校验链（模块图纸 01 §3：api_name 合法性 → 类型×存储矩阵 → 显示名称模板校验 →
  * 子项挂主 → 唯一性/引用完备性）。**纯函数、零依赖**：输入内存模型，输出人话违规清单
  * （带定位符），由服务层统一包装成 `420 BUSINESS_RULE`（`data.violations[]` 明细）。
  *
@@ -27,22 +27,10 @@ object MetadataValidator {
     val API_NAME: Regex = Regex("^[a-z][a-z0-9_]{2,47}$")
 
     /**
-     * 可为主显（名称字段）的类型资格（图纸 01 §3 落实项，⟨可逆⟩白名单，已随实况回写图纸）：
-     * 取「字符串可渲染或可编号」的标量型——文本/电话/邮箱/链接/编号/整数/小数/日期/日期时间。
-     * 不含富文本（TEXTAREA）、引用类与文件类。
+     * 显示名称模板占位符（`{字段 api_name}`）。【清单】S10 起主显从"选单一字段 + 类型白名单"改为
+     * 模板串，类型资格白名单作废——任何字段都可作片段；渲染归 M1-05，此处只校验占位符语法与引用存在性。
      */
-    val NAME_FIELD_TYPES: Set<LogicalType> =
-        setOf(
-            LogicalType.TEXT,
-            LogicalType.PHONE,
-            LogicalType.EMAIL,
-            LogicalType.URL,
-            LogicalType.AUTONUM,
-            LogicalType.NUMBER,
-            LogicalType.DECIMAL,
-            LogicalType.DATE,
-            LogicalType.DATETIME,
-        )
+    val DISPLAY_PLACEHOLDER: Regex = Regex("\\{([^{}]*)}")
 
     /** 字典层级上限（⟨可逆⟩，图纸 01 §1）。 */
     const val DICT_MAX_DEPTH: Int = 4
@@ -79,20 +67,7 @@ object MetadataValidator {
         }
 
         if (fields.isEmpty()) v += "对象 [${objectMeta.apiName}] 至少需要一个字段"
-        val nameField = fields.firstOrNull { it.id == objectMeta.nameFieldId }
-        when {
-            nameField == null -> {
-                v += "对象 [${objectMeta.apiName}] 缺少名称字段（name_field 必须指向本对象已有字段）"
-            }
-
-            !nameField.enabled -> {
-                v += "字段 [${nameField.apiName}] 已停用，不能作为名称字段"
-            }
-
-            nameField.logicalType !in NAME_FIELD_TYPES -> {
-                v += "字段 [${nameField.apiName}] 类型为 ${nameField.logicalType.display}，不能作为名称字段（可选类型：${NAME_FIELD_TYPES.joinToString("/") { it.display }}）"
-            }
-        }
+        v += checkDisplayNameTemplate(objectMeta.displayName, objectMeta.apiName, fields)
 
         // 快查字段必须指向本对象字段
         parseStringArray(objectMeta.quickSearchJson)?.let { quick ->
@@ -107,6 +82,36 @@ object MetadataValidator {
         fields.forEach { f ->
             if (!seen.add(f.apiName)) v += "字段 [${f.apiName}] 在对象 [${objectMeta.apiName}] 内重复"
             v += checkField(f)
+        }
+        return v
+    }
+
+    /**
+     * 显示名称模板校验（【清单】S10）：非空 + 花括号配平 + 每个 `{api_name}` 占位符须合法且指向本对象**启用**字段。
+     * 单字段＝"仅一个占位符"的特例；纯静态文本（无占位符）亦合法。跨引用链环检测依赖 `md_dep`（M1-07），本卡不做。
+     */
+    fun checkDisplayNameTemplate(
+        displayName: String?,
+        apiName: String,
+        fields: List<MdField>,
+    ): List<String> {
+        if (displayName.isNullOrBlank()) {
+            return listOf("对象 [$apiName] 缺少显示名称模板（display_name）")
+        }
+        val v = mutableListOf<String>()
+        val opens = displayName.count { it == '{' }
+        val closes = displayName.count { it == '}' }
+        if (opens != closes) {
+            v += "对象 [$apiName] 显示名称模板花括号不配平（{ $opens 个 / } $closes 个）"
+        }
+        val enabledApiNames = fields.filter { it.enabled }.map { it.apiName }.toSet()
+        DISPLAY_PLACEHOLDER.findAll(displayName).forEach { m ->
+            val token = m.groupValues[1]
+            when {
+                token.isBlank() -> v += "对象 [$apiName] 显示名称模板含空占位符 {}"
+                checkApiName(token) != null -> v += "对象 [$apiName] 显示名称模板占位符 {$token} 非法（须为字段 api_name）"
+                token !in enabledApiNames -> v += "对象 [$apiName] 显示名称模板占位符 {$token} 未指向本对象存在的启用字段"
+            }
         }
         return v
     }

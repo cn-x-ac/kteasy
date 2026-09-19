@@ -67,7 +67,7 @@ class MdGovernanceController(
                 label = requireText(body, "label"),
                 kind = requireText(body, "kind"),
                 parentApi = optionalText(body, "parent_object"),
-                nameFieldApi = requireText(body, "name_field"),
+                displayName = requireText(body, "display_name"),
                 quickSearchFields = optionalTextList(body, "quick_search_fields") ?: emptyList(),
                 fields = fields,
             )
@@ -101,7 +101,7 @@ class MdGovernanceController(
                     status = optionalText(body, "status"),
                     disabled = optionalBool(body, "disabled"),
                     quickSearchFields = optionalTextList(body, "quick_search_fields"),
-                    nameFieldApi = optionalText(body, "name_field"),
+                    displayName = optionalText(body, "display_name"),
                 ),
             ),
         )

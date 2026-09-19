@@ -65,7 +65,7 @@ class MetadataRepository(
                 label = rs.getString("label"),
                 kind = ObjectKind.valueOf(rs.getString("kind")),
                 parentObjectId = rs.getString("parent_object_id"),
-                nameFieldId = rs.getString("name_field_id"),
+                displayName = rs.getString("display_name"),
                 quickSearchJson = rs.getString("quick_search_json"),
                 status = rs.getString("status"),
                 disabled = rs.getBoolean("disabled"),
@@ -114,10 +114,10 @@ class MetadataRepository(
         jdbc.update(
             """
             INSERT INTO ${table("md_object")}
-                (id, api_name, label, kind, parent_object_id, name_field_id,
+                (id, api_name, label, kind, parent_object_id, display_name,
                  quick_search_json, status, disabled, created_by, updated_by)
             VALUES
-                (:id, :api_name, :label, :kind, :parent_object_id, :name_field_id,
+                (:id, :api_name, :label, :kind, :parent_object_id, :display_name,
                  ${jsonPh("quick_search_json")}, :status, :disabled, :created_by, :updated_by)
             """.trimIndent(),
             MapSqlParameterSource()
@@ -126,7 +126,7 @@ class MetadataRepository(
                 .addValue("label", o.label)
                 .addValue("kind", o.kind.name)
                 .addValue("parent_object_id", o.parentObjectId)
-                .addValue("name_field_id", o.nameFieldId)
+                .addValue("display_name", o.displayName)
                 .addValue("quick_search_json", o.quickSearchJson)
                 .addValue("status", o.status)
                 .addValue("disabled", o.disabled)
@@ -157,7 +157,7 @@ class MetadataRepository(
         label: String?,
         status: String?,
         disabled: Boolean?,
-        nameFieldId: String?,
+        displayName: String?,
         quickSearchJson: String?,
         updatedBy: String,
     ) {
@@ -167,7 +167,7 @@ class MetadataRepository(
                SET label = COALESCE(:label, label),
                    status = COALESCE(:status, status),
                    disabled = COALESCE(:disabled, disabled),
-                   name_field_id = COALESCE(:name_field_id, name_field_id),
+                   display_name = COALESCE(:display_name, display_name),
                    quick_search_json = COALESCE(${jsonPh("quick_search_json")}, quick_search_json),
                    updated_by = :updated_by
              WHERE id = :id
@@ -176,7 +176,7 @@ class MetadataRepository(
                 .addValue("label", label)
                 .addValue("status", status)
                 .addValue("disabled", disabled)
-                .addValue("name_field_id", nameFieldId)
+                .addValue("display_name", displayName)
                 .addValue("quick_search_json", quickSearchJson)
                 .addValue("updated_by", updatedBy)
                 .addValue("id", id),

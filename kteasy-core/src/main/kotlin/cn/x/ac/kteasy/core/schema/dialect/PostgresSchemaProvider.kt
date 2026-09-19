@@ -1,0 +1,266 @@
+/*
+ * Copyright 2026 阿杰很厉害 <master@x-ac.cn>. SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package cn.x.ac.kteasy.core.schema.dialect
+
+/**
+ * PostgreSQL 方言实现（【清单】S8：PG 为**参考实现**，JSONB + GIN + CONCURRENTLY 全能力）。
+ *
+ * 纯字符串构造，零 JDBC 依赖（core 保持纯库；SQL 的执行与参数绑定归 query/schema 模块）。
+ * 唯一强制约束：`CREATE INDEX CONCURRENTLY` 返回的语句 `runOutsideTransaction=true`，
+ * 从接口产物层面杜绝「把在线建索引塞进事务」——由 M1-03 执行器在事务外单独跑。
+ */
+class PostgresSchemaProvider : SchemaProvider {
+    override val namespace: NamespaceMapper = PgNamespace
+
+    override val json: JsonOps = PgJsonOps
+
+    override val index: IndexOps = PgIndexOps
+
+    override val column: ColumnOps = PgColumnOps
+
+    override val upsert: UpsertFragment = PgUpsert
+
+    override val lock: LockOps = PgLock
+
+    override val lockingRead: LockingReadOps = PgLockingRead
+
+    override val ddlTx: DdlTx = PgDdlTx
+
+    override val fullText: FullText = PgFullText
+
+    override fun capabilities(): Set<Capability> =
+        setOf(
+            Capability.JSON_GIN_INDEX,
+            Capability.ONLINE_INDEX_NO_LOCK,
+            Capability.TRANSACTIONAL_DDL,
+            Capability.VIRTUAL_COLUMN_INDEX,
+            Capability.INSTANT_ADD_COLUMN,
+            Capability.SKIP_LOCKED,
+        )
+
+    override fun ledger(): List<CapabilityReport> =
+        listOf(
+            CapabilityReport(Capability.JSON_GIN_INDEX, CapabilityLevel.SUPPORTS, "GIN + jsonb_path_ops 承载 @> 包含与存在性"),
+            CapabilityReport(
+                Capability.JSON_MULTI_VALUED_INDEX,
+                CapabilityLevel.DEGRADED,
+                "PG 无 CAST AS ARRAY 多值索引；数组包含改由 GIN jsonb_path_ops 承载",
+            ),
+            CapabilityReport(Capability.ONLINE_INDEX_NO_LOCK, CapabilityLevel.SUPPORTS, "CREATE INDEX CONCURRENTLY（须事务外）"),
+            CapabilityReport(Capability.TRANSACTIONAL_DDL, CapabilityLevel.SUPPORTS, "DDL 可回滚"),
+            CapabilityReport(Capability.VIRTUAL_COLUMN_INDEX, CapabilityLevel.SUPPORTS, "PG18 VIRTUAL 生成列"),
+            CapabilityReport(Capability.INSTANT_ADD_COLUMN, CapabilityLevel.SUPPORTS, "加可空列瞬时"),
+            CapabilityReport(Capability.SKIP_LOCKED, CapabilityLevel.SUPPORTS, "FOR UPDATE SKIP LOCKED"),
+        )
+}
+
+private object PgNamespace : NamespaceMapper {
+    override fun qualified(
+        area: LogicalArea,
+        name: String,
+    ): String {
+        val schema = requireNotNull(area.pgSchema) { "PG 需 schema 限定，逻辑区 $area 无 schema" }
+        return "$schema.${area.pgPrefix}$name"
+    }
+}
+
+private object PgJsonOps : JsonOps {
+    override fun extractText(
+        column: String,
+        path: JsonPath,
+    ): Fragment = Fragment("($column #>> '${path.toPgArrayLiteral()}')")
+
+    override fun extractTyped(
+        column: String,
+        path: JsonPath,
+        cast: ValueCast,
+    ): Fragment = Fragment("($column #>> '${path.toPgArrayLiteral()}')::${cast.toPgType()}")
+
+    override fun predicateExists(
+        column: String,
+        path: JsonPath,
+    ): Fragment = Fragment("($column #> '${path.toPgArrayLiteral()}' IS NOT NULL)")
+
+    override fun arrayContains(
+        column: String,
+        path: JsonPath,
+        value: String,
+    ): Fragment {
+        val doc = buildPgContainmentDoc(path, value)
+        return Fragment("($column @> CAST(:$PG_ARR_PARAM AS jsonb))", mapOf(PG_ARR_PARAM to doc))
+    }
+
+    override fun bindJson(param: String): String = "CAST(:$param AS jsonb)"
+
+    /** 由路径与标量值合成 `@>` 的包含文档（末段为数组）：如 `{a,b}`+`v` → `{"a":{"b":["v"]}}`。 */
+    private fun buildPgContainmentDoc(
+        path: JsonPath,
+        value: String,
+    ): String {
+        val element = jsonQuote(value)
+        var node = "[$element]"
+        for (seg in path.segments.asReversed()) {
+            node = "{${jsonQuote(seg)}:$node}"
+        }
+        return node
+    }
+
+    private const val PG_ARR_PARAM = "__kteasy_arr"
+}
+
+private object PgIndexOps : IndexOps {
+    override fun createExpressionIndex(
+        table: String,
+        expressionSql: String,
+        name: String,
+        online: Boolean,
+    ): List<DdlStatement> {
+        val concurrently = if (online) "CONCURRENTLY " else ""
+        // 表达式索引须双括号：外层是列清单、内层把表达式标成 expression。
+        val stmt = "CREATE INDEX $concurrently$name ON $table (($expressionSql))"
+        return listOf(DdlStatement(stmt, runOutsideTransaction = online))
+    }
+
+    override fun createJsonArrayIndex(
+        table: String,
+        column: String,
+        path: JsonPath,
+        name: String,
+        online: Boolean,
+    ): List<DdlStatement> {
+        val concurrently = if (online) "CONCURRENTLY " else ""
+        val stmt = "CREATE INDEX $concurrently$name ON $table USING gin ($column jsonb_path_ops)"
+        return listOf(DdlStatement(stmt, runOutsideTransaction = online))
+    }
+}
+
+private object PgColumnOps : ColumnOps {
+    override fun addNullableColumn(
+        table: String,
+        name: String,
+        cast: ValueCast,
+    ): List<DdlStatement> = listOf(DdlStatement("ALTER TABLE $table ADD COLUMN $name ${cast.toPgType()} NULL"))
+
+    override fun addVirtualColumn(
+        table: String,
+        name: String,
+        cast: ValueCast,
+        expressionSql: String,
+        index: Boolean,
+    ): List<DdlStatement> {
+        val out =
+            mutableListOf(
+                DdlStatement("ALTER TABLE $table ADD COLUMN $name ${cast.toPgType()} GENERATED ALWAYS AS ($expressionSql) VIRTUAL"),
+            )
+        if (index) {
+            out += DdlStatement("CREATE INDEX ${name}_ix ON $table ($name)")
+        }
+        return out
+    }
+
+    override fun dropColumn(
+        table: String,
+        name: String,
+    ): DdlStatement = DdlStatement("ALTER TABLE $table DROP COLUMN $name")
+}
+
+private object PgUpsert : UpsertFragment {
+    override fun supportsReturning(): Boolean = true
+
+    override fun build(
+        table: String,
+        columns: List<String>,
+        conflictColumns: List<String>,
+        updateColumns: List<String>,
+        returning: String?,
+    ): String {
+        require(columns.isNotEmpty()) { "upsert 至少一列" }
+        require(conflictColumns.isNotEmpty()) { "PG ON CONFLICT 需冲突目标列" }
+        val colList = columns.joinToString(", ")
+        val valList = columns.joinToString(", ") { ":$it" }
+        val sb = StringBuilder("INSERT INTO $table ($colList) VALUES ($valList)")
+        sb.append(" ON CONFLICT (${conflictColumns.joinToString(", ")})")
+        if (updateColumns.isEmpty()) {
+            sb.append(" DO NOTHING")
+        } else {
+            sb.append(" DO UPDATE SET ")
+            sb.append(updateColumns.joinToString(", ") { "$it = EXCLUDED.$it" })
+        }
+        if (!returning.isNullOrBlank()) {
+            sb.append(" RETURNING $returning")
+        }
+        return sb.toString()
+    }
+}
+
+private object PgLock : LockOps {
+    override fun lock(key: LockKey): Fragment = Fragment("SELECT pg_advisory_lock(:$LOCK_ID)", mapOf(LOCK_ID to key.id))
+
+    // PG try-lock 为「立即返回」语义（不支持秒级等待），timeout 参数被忽略——两库差异经台账如实暴露。
+    override fun tryLock(
+        key: LockKey,
+        timeoutSeconds: Int,
+    ): Fragment = Fragment("SELECT pg_try_advisory_lock(:$LOCK_ID)", mapOf(LOCK_ID to key.id))
+
+    override fun unlock(key: LockKey): Fragment = Fragment("SELECT pg_advisory_unlock(:$LOCK_ID)", mapOf(LOCK_ID to key.id))
+
+    private const val LOCK_ID = "__kteasy_lock_id"
+}
+
+private object PgLockingRead : LockingReadOps {
+    override fun forUpdate(skipLocked: Boolean): String = if (skipLocked) "FOR UPDATE SKIP LOCKED" else "FOR UPDATE"
+}
+
+private object PgDdlTx : DdlTx {
+    override fun supportsTransactionalDDL(): Boolean = true
+}
+
+private object PgFullText : FullText {
+    override fun likePredicate(
+        column: String,
+        param: String,
+    ): Fragment = Fragment("(lower($column) LIKE lower(:$param))")
+}
+
+/** 路径段 → PG 文本数组字面量 `{a,b}`（`#>`/`#>>` 要求；段为受校验的标识符）。 */
+internal fun JsonPath.toPgArrayLiteral(): String = segments.joinToString(",", "{", "}")
+
+/** [ValueCast] → PG 类型名（加速/落库用；M1-04 完整 26 型 DDL 映射另行落地）。 */
+internal fun ValueCast.toPgType(): String =
+    when (this) {
+        ValueCast.BOOL -> "boolean"
+        ValueCast.LONG -> "bigint"
+        ValueCast.DOUBLE -> "numeric"
+        ValueCast.TEXT -> "text"
+        ValueCast.DATE -> "date"
+        ValueCast.TIMESTAMP -> "timestamptz"
+    }
+
+/** 最小 JSON 字符串转义（够标识符与常见标量用；不含代理对精细处理）。 */
+internal fun jsonQuote(s: String): String {
+    val sb = StringBuilder("\"")
+    for (ch in s) {
+        when (ch) {
+            '"' -> sb.append("\\\"")
+            '\\' -> sb.append("\\\\")
+            '\n' -> sb.append("\\n")
+            '\r' -> sb.append("\\r")
+            '\t' -> sb.append("\\t")
+            else -> if (ch.code < 0x20) sb.append("\\u%04x".format(ch.code)) else sb.append(ch)
+        }
+    }
+    return sb.append("\"").toString()
+}

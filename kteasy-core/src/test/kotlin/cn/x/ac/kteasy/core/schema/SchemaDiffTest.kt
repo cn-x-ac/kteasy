@@ -21,10 +21,19 @@ import cn.x.ac.kteasy.core.meta.MdObject
 import cn.x.ac.kteasy.core.meta.ObjectKind
 import cn.x.ac.kteasy.core.meta.StorageKind
 import cn.x.ac.kteasy.core.schema.StepKind.ADD_FK_COLUMN
+import cn.x.ac.kteasy.core.schema.StepKind.ADD_INDEX_EXPR
+import cn.x.ac.kteasy.core.schema.StepKind.ADD_VIRTUAL_COLUMN
+import cn.x.ac.kteasy.core.schema.StepKind.BACKFILL_BATCH
+import cn.x.ac.kteasy.core.schema.StepKind.CLEAN_EXT_KEY
 import cn.x.ac.kteasy.core.schema.StepKind.CREATE_RTABLE
 import cn.x.ac.kteasy.core.schema.StepKind.CREATE_TABLE
 import cn.x.ac.kteasy.core.schema.StepKind.DROP_COLUMN
+import cn.x.ac.kteasy.core.schema.StepKind.DROP_TABLE
+import cn.x.ac.kteasy.core.schema.StepKind.SWITCH_READ
+import cn.x.ac.kteasy.core.schema.dialect.ColumnType
 import cn.x.ac.kteasy.core.schema.dialect.LogicalArea
+import cn.x.ac.kteasy.core.schema.dialect.PhysicalColumn
+import cn.x.ac.kteasy.core.schema.dialect.ValueCast
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -145,5 +154,64 @@ class SchemaDiffTest {
                 .single()
                 .refTable,
         ).isEqualTo("customer")
+    }
+
+    @Test
+    fun `对象标记删除且表存在只发DROP_TABLE 未建表则空`() {
+        val gone = obj.copy(disabled = true)
+        val exists = SchemaDiff.diff(input(emptyList(), MaterializedState(tableExists = true), meta = gone))
+        assertThat(exists.map { it.kind }).containsExactly(DROP_TABLE)
+        assertThat((exists.single().op as StepOp.DropTable).name).isEqualTo("customer")
+        assertThat((exists.single().op as StepOp.DropTable).area).isEqualTo(LogicalArea.ENTITY)
+
+        val notYet = SchemaDiff.diff(input(emptyList(), MaterializedState(tableExists = false), meta = gone))
+        assertThat(notYet).isEmpty()
+    }
+
+    @Test
+    fun `物理化计划 带索引五步不丢数幂等字段齐备`() {
+        val column = PhysicalColumn("amount", ColumnType.BIGINT)
+        val steps =
+            SchemaDiff.planPhysicalize(
+                objectId = "OBJ1",
+                hostTable = "customer",
+                fieldId = "F_amount",
+                fieldApi = "amount",
+                column = column,
+                cast = ValueCast.LONG,
+                makeIndex = true,
+            )
+        assertThat(steps.map { it.kind }).containsExactly(ADD_VIRTUAL_COLUMN, BACKFILL_BATCH, ADD_INDEX_EXPR, SWITCH_READ, CLEAN_EXT_KEY)
+        assertThat(steps.map { it.seq }).containsExactly(0, 1, 2, 3, 4)
+
+        assertThat((steps[0].op as StepOp.AddVirtualColumn).column).isEqualTo(column)
+        val backfill = steps[1].op as StepOp.BackfillBatch
+        assertThat(backfill.targetColumn).isEqualTo("amount")
+        assertThat(backfill.batchSize).isEqualTo(2000)
+        val index = steps[2].op as StepOp.AddIndexExpr
+        assertThat(index.online).isTrue()
+        assertThat(index.indexName).isEqualTo("ix_customer_amount")
+        assertThat(index.keyPath).containsExactly("amount")
+        assertThat((steps[3].op as StepOp.SwitchRead).fieldId).isEqualTo("F_amount")
+        val clean = steps[4].op as StepOp.CleanExtKey
+        // 不丢数护栏：清 key 只作用已回填的 targetColumn 行。
+        assertThat(clean.targetColumn).isEqualTo("amount")
+        assertThat(clean.keyPath).containsExactly("amount")
+    }
+
+    @Test
+    fun `物理化计划 无索引则四步`() {
+        val steps = SchemaDiff.planPhysicalize("OBJ1", "customer", "F_amount", "amount", PhysicalColumn("amount", ColumnType.BIGINT), ValueCast.LONG, makeIndex = false)
+        assertThat(steps.map { it.kind }).containsExactly(ADD_VIRTUAL_COLUMN, BACKFILL_BATCH, SWITCH_READ, CLEAN_EXT_KEY)
+        assertThat(steps.map { it.seq }).containsExactly(0, 1, 2, 3)
+    }
+
+    @Test
+    fun `可物理化标量判据 COLUMN标量为真 关系型与EXT为假`() {
+        val scalarCol = MdField(id = "F1", objectId = "OBJ1", apiName = "amount", label = "金额", logicalType = LogicalType.DECIMAL, storageKind = StorageKind.COLUMN, enabled = true)
+        assertThat(SchemaDiff.isPhysicalizableScalar(scalarCol)).isTrue()
+        assertThat(SchemaDiff.isPhysicalizableScalar(refField("owner_ref"))).isFalse()
+        assertThat(SchemaDiff.isPhysicalizableScalar(dictField("stage"))).isFalse()
+        assertThat(SchemaDiff.isPhysicalizableScalar(extField("name"))).isFalse()
     }
 }

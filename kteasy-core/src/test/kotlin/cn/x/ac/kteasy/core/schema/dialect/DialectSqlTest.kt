@@ -82,6 +82,18 @@ class DialectSqlTest {
         assertThat(myFrag.params.values.single()).isEqualTo("vip")
     }
 
+    @Test
+    fun `removeKey 清 ext 键 PG 用井号连字符 MySQL 用 JSON_REMOVE 且无绑定参数`() {
+        assertThat(pg.json.removeKey("ext", JsonPath.of("amount")).sql).isEqualTo("(ext #- '{amount}'::text[])")
+        assertThat(my.json.removeKey("ext", JsonPath.of("amount")).sql).isEqualTo("JSON_REMOVE(ext, '$.amount')")
+        // 嵌套：PG text[] 路径、MySQL $.a.b；均无绑定参数。
+        val nested = JsonPath.of("addr", "city")
+        assertThat(pg.json.removeKey("ext", nested).sql).isEqualTo("(ext #- '{addr,city}'::text[])")
+        assertThat(pg.json.removeKey("ext", nested).params).isEmpty()
+        assertThat(my.json.removeKey("ext", nested).sql).isEqualTo("JSON_REMOVE(ext, '$.addr.city')")
+        assertThat(my.json.removeKey("ext", nested).params).isEmpty()
+    }
+
     // ---------- IndexOps（PG CONCURRENTLY 强制事务外） ----------
 
     @Test

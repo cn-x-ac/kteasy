@@ -107,6 +107,11 @@ private object PgJsonOps : JsonOps {
         return Fragment("($column @> CAST(:$PG_ARR_PARAM AS jsonb))", mapOf(PG_ARR_PARAM to doc))
     }
 
+    override fun removeKey(
+        column: String,
+        path: JsonPath,
+    ): Fragment = Fragment("($column #- '${path.toPgArrayLiteral()}'::text[])")
+
     override fun bindJson(param: String): String = "CAST(:$param AS jsonb)"
 
     /** 由路径与标量值合成 `@>` 的包含文档（末段为数组）：如 `{a,b}`+`v` → `{"a":{"b":["v"]}}`。 */

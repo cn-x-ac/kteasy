@@ -28,6 +28,7 @@ import cn.x.ac.kteasy.core.schema.dialect.LogicalArea
 import cn.x.ac.kteasy.core.schema.dialect.PhysicalColumn
 import cn.x.ac.kteasy.core.schema.dialect.TableSpec
 import cn.x.ac.kteasy.core.schema.dialect.UniqueSpec
+import cn.x.ac.kteasy.core.schema.dialect.ValueCast
 
 /*
  * 物化引擎的**纯 diff 内核**（步骤卡 M1-03 设计要点 1/4）。输入＝对象元数据（期望态）+ 已物化的物理态
@@ -90,7 +91,12 @@ sealed class StepOp {
         val name: String,
     ) : StepOp()
 
-    /** 物理化第一步：加 VIRTUAL 生成列（S7 档二，Block E 落地发射）。 */
+    /**
+     * 物理化第一步：加一列**可空真列**（非 STORED 生成列，避免全表重写；执行器走 `addNullableColumn`）。
+     *
+     * [expressionSourceColumn] 记录 ext 来源键（供回填取数与清 key 定位），[index] 标记是否顺带建表达式索引。
+     * 类名 `AddVirtualColumn` 为历史命名保留（PG18 VIRTUAL 生成列是提列者可选的替代策略，非本步默认）。
+     */
     data class AddVirtualColumn(
         val hostArea: LogicalArea,
         val hostTable: String,
@@ -105,6 +111,50 @@ sealed class StepOp {
         val hostTable: String,
         val targetColumn: String,
         val expressionSourceColumn: String,
+        val batchSize: Int,
+    ) : StepOp()
+
+    /** 表达式索引（S7 档一热字段加速）：对 [extColumn] 的 [keyPath] 按 [cast] 取值建索引，可在线。 */
+    data class AddIndexExpr(
+        val hostArea: LogicalArea,
+        val hostTable: String,
+        val indexName: String,
+        val extColumn: String,
+        val keyPath: List<String>,
+        val cast: ValueCast,
+        val online: Boolean,
+    ) : StepOp()
+
+    /** 删索引（档一回退 / 表达式索引逆步）；幂等由执行器 `indexExists` 探测。 */
+    data class DropIndex(
+        val hostArea: LogicalArea,
+        val hostTable: String,
+        val indexName: String,
+        val online: Boolean,
+    ) : StepOp()
+
+    /**
+     * 读切换屏障（物理化③→④之间）：无 DDL，仅在校验「目标列已无 NULL 残留」后把 md_field 读判据翻 COLUMN。
+     *
+     * [fieldId] 供执行器定位并幂等更新 `storage_kind`；[hostTable]/[column] 供回填完成度校验。因 `storage_kind`
+     * 已是唯一读判据，此步不落新列、不改读源位，仅保证「回填全量完成」这一前置后才认列。
+     */
+    data class SwitchRead(
+        val fieldId: String,
+        val hostTable: String,
+        val column: String,
+    ) : StepOp()
+
+    /**
+     * 分批清理 ext key（物理化末步）：仅对「目标列已回填非空」的行 `ext = removeKey(ext, keyPath)`，
+     * 数据不丢护栏＝绝不清未迁移行；幂等（键已删再删无副作用），可续跑。
+     */
+    data class CleanExtKey(
+        val hostArea: LogicalArea,
+        val hostTable: String,
+        val targetColumn: String,
+        val extColumn: String,
+        val keyPath: List<String>,
         val batchSize: Int,
     ) : StepOp()
 }
@@ -149,8 +199,19 @@ object SchemaDiff {
 
     private const val DICT_PATH_LEN = 512
 
+    /** 物理化回填 / 清 ext key 的每批行数（卡面 2000，⟨可逆⟩）。 */
+    private const val BACKFILL_BATCH_SIZE = 2000
+
     fun diff(input: DiffInput): List<SchemaStep> {
         val obj = input.objectMeta
+        // 对象删除：仅当 md 标记 disabled 且物理表存在 → 单条 DROP_TABLE（破坏性引用守卫在执行器 precheck 把关）。
+        if (obj.disabled) {
+            return if (input.actual.tableExists) {
+                listOf(step(obj.id, StepKind.DROP_TABLE, StepOp.DropTable(LogicalArea.ENTITY, obj.apiName)))
+            } else {
+                emptyList()
+            }
+        }
         val enabled = input.fields.filter { it.enabled }
         val steps = mutableListOf<SchemaStep>()
 
@@ -331,4 +392,39 @@ object SchemaDiff {
         val third: C,
         val fourth: D,
     )
+
+    /** 某标量字段是否属「可物理化标量」：storage_kind=COLUMN 且非关系型（REF/DICT/ANYREF）。 */
+    fun isPhysicalizableScalar(field: MdField): Boolean =
+        field.storageKind == StorageKind.COLUMN &&
+            field.logicalType != LogicalType.REF &&
+            field.logicalType != LogicalType.DICT &&
+            field.logicalType != LogicalType.ANYREF
+
+    /**
+     * 为「把已存 ext 的标量字段提为独立可写真列」产出**有序、幂等、可续跑、不丢数**的物理化步序列（S7 档二）。
+     *
+     * 由显式提列动作（M1-04）提交，**非**通用 diff 推导（守住「EXT 永不产步」不变式）。五步全幂等，故 kill -9
+     * 重跑收敛到同一终态：加可空列（precheck 探列）→ 分批回填（`WHERE 目标列 IS NULL`）→ 可选表达式索引（precheck 探索引）
+     * → 读切换（校验回填全量非空后翻 `storage_kind`）→ 清 ext key（仅清已回填行、绝不动未迁移数据）。
+     * [makeIndex] 决定是否夹带档一表达式索引；[cast] 是从 ext 抽取后落列的类型（由字段类型注册表解析，M1-04）。
+     */
+    fun planPhysicalize(
+        objectId: String,
+        hostTable: String,
+        fieldId: String,
+        fieldApi: String,
+        column: PhysicalColumn,
+        cast: ValueCast,
+        makeIndex: Boolean,
+    ): List<SchemaStep> {
+        val steps = mutableListOf<SchemaStep>()
+        steps += step(objectId, StepKind.ADD_VIRTUAL_COLUMN, StepOp.AddVirtualColumn(LogicalArea.ENTITY, hostTable, column, fieldApi, makeIndex))
+        steps += step(objectId, StepKind.BACKFILL_BATCH, StepOp.BackfillBatch(LogicalArea.ENTITY, hostTable, fieldApi, fieldApi, BACKFILL_BATCH_SIZE))
+        if (makeIndex) {
+            steps += step(objectId, StepKind.ADD_INDEX_EXPR, StepOp.AddIndexExpr(LogicalArea.ENTITY, hostTable, "ix_${hostTable}_$fieldApi", "ext", listOf(fieldApi), cast, online = true))
+        }
+        steps += step(objectId, StepKind.SWITCH_READ, StepOp.SwitchRead(fieldId, hostTable, fieldApi))
+        steps += step(objectId, StepKind.CLEAN_EXT_KEY, StepOp.CleanExtKey(LogicalArea.ENTITY, hostTable, fieldApi, "ext", listOf(fieldApi), BACKFILL_BATCH_SIZE))
+        return steps.mapIndexed { i, s -> s.copy(seq = i) }
+    }
 }

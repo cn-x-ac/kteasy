@@ -113,6 +113,11 @@ private object MyJsonOps : JsonOps {
             mapOf(MY_OF_PARAM to value),
         )
 
+    override fun removeKey(
+        column: String,
+        path: JsonPath,
+    ): Fragment = Fragment("JSON_REMOVE($column, '${path.toMySqlJsonPath()}')")
+
     override fun bindJson(param: String): String = ":$param"
 
     private const val MY_OF_PARAM = "__kteasy_of"

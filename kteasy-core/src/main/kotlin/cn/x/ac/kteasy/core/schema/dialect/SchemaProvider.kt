@@ -70,6 +70,16 @@ interface JsonOps {
         value: String,
     ): Fragment
 
+    /**
+     * 删除 [path] 处键后的**新值表达式**（无绑定参数；路径按字面量内联，段值来源受控元数据 api_name）。
+     * 供物理化 `CLEAN_EXT_KEY` 步回填后清理旧 ext key（PG `col #- '{a,b}'::text[]`、MySQL `JSON_REMOVE`）。
+     * 调用方负责仅对「目标列已回填非空」的行施加，避免误删未迁移数据。
+     */
+    fun removeKey(
+        column: String,
+        path: JsonPath,
+    ): Fragment
+
     /** 写入 JSON 值的占位符：PG 需 `CAST(:param AS jsonb)`，MySQL 直接 `:param`（收编 M1-01 [MdNamespace] 过渡债）。 */
     fun bindJson(param: String): String
 }

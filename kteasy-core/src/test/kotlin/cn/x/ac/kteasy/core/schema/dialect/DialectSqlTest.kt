@@ -105,7 +105,10 @@ class DialectSqlTest {
         assertThat(pgStmts[0].runOutsideTransaction).isTrue()
 
         val myStmts = my.index.createExpressionIndex("e_customer", "(CAST(ext->>'$.amount' AS DECIMAL))", "ix_amount", online = true)
-        assertThat(myStmts.single().sql).contains("ALGORITHM=INPLACE, LOCK=NONE").doesNotContain("CONCURRENTLY")
+        assertThat(myStmts.single().sql)
+            .startsWith("ALTER TABLE e_customer ADD INDEX ix_amount ((")
+            .contains(", ALGORITHM=INPLACE, LOCK=NONE")
+            .doesNotContain("CONCURRENTLY")
         assertThat(myStmts.single().runOutsideTransaction).isFalse()
     }
 

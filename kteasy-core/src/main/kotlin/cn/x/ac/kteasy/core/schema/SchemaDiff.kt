@@ -203,13 +203,13 @@ object SchemaDiff {
         val fks = mutableListOf<ForeignKeySpec>()
         val idxs = mutableListOf<IndexSpec>()
 
-        cols += PhysicalColumn("id", ColumnType.VARCHAR, ID_LEN, nullable = false, primaryKey = true)
-        cols += PhysicalColumn("owner_user", ColumnType.VARCHAR, ID_LEN)
-        cols += PhysicalColumn("owner_dept", ColumnType.VARCHAR, ID_LEN)
+        cols += PhysicalColumn("id", ColumnType.VARCHAR, ID_LEN, nullable = false, primaryKey = true, binaryCollation = true)
+        cols += PhysicalColumn("owner_user", ColumnType.VARCHAR, ID_LEN, binaryCollation = true)
+        cols += PhysicalColumn("owner_dept", ColumnType.VARCHAR, ID_LEN, binaryCollation = true)
         cols += PhysicalColumn("created_at", ColumnType.TIMESTAMP, nullable = false, default = ColumnDefault.Now)
-        cols += PhysicalColumn("created_by", ColumnType.VARCHAR, ID_LEN)
+        cols += PhysicalColumn("created_by", ColumnType.VARCHAR, ID_LEN, binaryCollation = true)
         cols += PhysicalColumn("updated_at", ColumnType.TIMESTAMP, nullable = false, default = ColumnDefault.Now)
-        cols += PhysicalColumn("updated_by", ColumnType.VARCHAR, ID_LEN)
+        cols += PhysicalColumn("updated_by", ColumnType.VARCHAR, ID_LEN, binaryCollation = true)
         cols += PhysicalColumn("deleted_at", ColumnType.TIMESTAMP)
         cols += PhysicalColumn("approval_state", ColumnType.VARCHAR, 16, nullable = false, default = ColumnDefault.Literal("DRAFT"))
         cols += PhysicalColumn("row_version", ColumnType.BIGINT, nullable = false, default = ColumnDefault.Zero)
@@ -217,7 +217,7 @@ object SchemaDiff {
 
         if (obj.kind == ObjectKind.CHILD) {
             val parent = requireNotNull(input.parentApi) { "CHILD 对象 [${obj.apiName}] 缺父表 api，无法建 parent_id 外键" }
-            cols += PhysicalColumn("parent_id", ColumnType.VARCHAR, ID_LEN)
+            cols += PhysicalColumn("parent_id", ColumnType.VARCHAR, ID_LEN, binaryCollation = true)
             fks += ForeignKeySpec("fk_${obj.apiName}_parent", LogicalArea.ENTITY, obj.apiName, "parent_id", LogicalArea.ENTITY, parent)
         }
 
@@ -249,15 +249,15 @@ object SchemaDiff {
         return when (f.logicalType) {
             LogicalType.REF -> {
                 val target = f.refObjectId?.let { input.objectApiById[it] }
-                val main = PhysicalColumn(api, ColumnType.VARCHAR, ID_LEN)
+                val main = PhysicalColumn(api, ColumnType.VARCHAR, ID_LEN, binaryCollation = true)
                 val fk = target?.let { ForeignKeySpec("fk_${obj.apiName}_$api", LogicalArea.ENTITY, obj.apiName, api, LogicalArea.ENTITY, it) }
                 Tuple4(main, null, fk, null)
             }
 
             LogicalType.ANYREF -> {
                 Tuple4(
-                    PhysicalColumn(api, ColumnType.VARCHAR, ID_LEN),
-                    PhysicalColumn("${api}_obj", ColumnType.VARCHAR, 64),
+                    PhysicalColumn(api, ColumnType.VARCHAR, ID_LEN, binaryCollation = true),
+                    PhysicalColumn("${api}_obj", ColumnType.VARCHAR, 64, binaryCollation = true),
                     null,
                     null,
                 )
@@ -291,9 +291,9 @@ object SchemaDiff {
         val targetCol = targetApi?.let { "dst_${it}_id" } ?: "dst_id"
         val cols =
             listOf(
-                PhysicalColumn("id", ColumnType.VARCHAR, ID_LEN, nullable = false, primaryKey = true),
-                PhysicalColumn(sourceCol, ColumnType.VARCHAR, ID_LEN, nullable = false),
-                PhysicalColumn(targetCol, ColumnType.VARCHAR, ID_LEN, nullable = false),
+                PhysicalColumn("id", ColumnType.VARCHAR, ID_LEN, nullable = false, primaryKey = true, binaryCollation = true),
+                PhysicalColumn(sourceCol, ColumnType.VARCHAR, ID_LEN, nullable = false, binaryCollation = true),
+                PhysicalColumn(targetCol, ColumnType.VARCHAR, ID_LEN, nullable = false, binaryCollation = true),
                 PhysicalColumn("ext", ColumnType.JSON),
             )
         val fks =

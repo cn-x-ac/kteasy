@@ -298,6 +298,30 @@ class DialectSqlTest {
         assertThat(my.index.dropIndex("e_customer", "ix_amt", online = false).sql).isEqualTo("ALTER TABLE e_customer DROP INDEX ix_amt")
     }
 
+    // ---------- TableOps：id/引用列钉 binary 排序规则（M1-03 设计要点 7） ----------
+
+    @Test
+    fun `binary 列 PG 钉 C 排序规则 MySQL 钉 utf8mb4_bin 普通列不吃`() {
+        val idCol = PhysicalColumn("id", ColumnType.VARCHAR, 32, nullable = false, primaryKey = true, binaryCollation = true)
+        val plain = PhysicalColumn("label", ColumnType.VARCHAR, 191)
+        val spec = TableSpec(LogicalArea.ENTITY, "customer", listOf(idCol, plain, extCol))
+        val pgSql =
+            pg.table
+                .createTable(spec)
+                .last()
+                .sql
+        assertThat(pgSql).contains("id varchar(32) COLLATE \"C\"")
+        assertThat(pgSql).doesNotContain("label varchar(191) COLLATE")
+        val myStmts = my.table.addColumn("e_customer", idCol)
+        assertThat(myStmts.first().sql).contains("id varchar(32) COLLATE utf8mb4_bin")
+        assertThat(
+            my.table
+                .addColumn("e_customer", plain)
+                .first()
+                .sql,
+        ).doesNotContain("COLLATE")
+    }
+
     // ---------- IntrospectionOps（precheck 探测：count>0 判存在） ----------
 
     @Test

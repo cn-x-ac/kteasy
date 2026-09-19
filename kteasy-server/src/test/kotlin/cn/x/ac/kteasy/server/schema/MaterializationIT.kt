@@ -81,6 +81,36 @@ class MaterializationIT {
         return jdbc().queryForList(frag.sql, MapSqlParameterSource(frag.params), String::class.java).filterNotNull().toSet()
     }
 
+    private val pg get() = context.dialect.profile == "pg"
+
+    /** 某列当前的排序规则名（GWT 第 22 行：验证 id/引用列钉了 binary）。测试区直查信息模式，豁免红线⑤。 */
+    private fun collationOf(
+        area: LogicalArea,
+        logical: String,
+        column: String,
+    ): String? =
+        if (pg) {
+            jdbc()
+                .queryForList(
+                    "SELECT collation_name FROM information_schema.columns WHERE table_schema = :s AND table_name = :t AND column_name = :c",
+                    mapOf("s" to area.pgSchema, "t" to area.pgPrefix + logical, "c" to column),
+                    String::class.java,
+                ).firstOrNull()
+        } else {
+            jdbc()
+                .queryForList(
+                    "SELECT COLLATION_NAME FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = :t AND column_name = :c",
+                    mapOf("t" to area.mysqlPrefix + logical, "c" to column),
+                    String::class.java,
+                ).firstOrNull()
+        }
+
+    /** 物理限定名（PG 表名带 schema 前缀 `app.x`，MySQL 平铺 `e_x`），供测试区手拼 JOIN。 */
+    private fun qual(
+        area: LogicalArea,
+        logical: String,
+    ): String = provider.namespace.qualified(area, logical)
+
     /** 轮询直到条件成立或超时（执行器异步，不能同步断言）。 */
     private fun await(
         timeoutMs: Long = 40_000,
@@ -159,5 +189,27 @@ class MaterializationIT {
             .`as`("新引用字段应补真列；诊断 rows=%s", jobRepo.listByObject(obj.id))
             .isTrue()
         assertThat(jobRepo.listByObject(obj.id).any { it.stepKind.name == "ADD_FK_COLUMN" }).isTrue()
+
+        // GWT 第 22 行：id 及全部引用列钉 binary（实体表 + r_ 双方 + 增量加的引用列）。
+        val bin = if (pg) "C" else "utf8mb4_bin"
+        assertThat(collationOf(LogicalArea.ENTITY, custApi, "id")).`as`("实体表 id 钉 binary").isEqualTo(bin)
+        assertThat(collationOf(LogicalArea.ENTITY, custApi, "owner_ref")).isEqualTo(bin)
+        assertThat(collationOf(LogicalArea.ENTITY, custApi, "owner2_ref")).`as`("增量加引用列也钉 binary").isEqualTo(bin)
+        assertThat(collationOf(LogicalArea.RELATION, "${custApi}_tags", "src_${custApi}_id")).`as`("r_ 双方列钉 binary").isEqualTo(bin)
+        if (!pg) {
+            // 反证非 id 列不吃默认之外的规则（MySQL 默认 ai_ci，PG 默认随实例、不可反证故跳过）。
+            assertThat(collationOf(LogicalArea.ENTITY, custApi, "approval_state")).`as`("非标识符列保持表默认").isEqualTo("utf8mb4_0900_ai_ci")
+        }
+
+        // JOIN/FK 两端 collation 一致 → 不出现 Illegal mix of collations（MySQL 会直接抛）。
+        // 对象表 ⋈ 其 r_ 关联表；以及 md_object ⋈ md_field（验证 V6 对 md 区的回补）。
+        jdbc().queryForList(
+            "SELECT count(*) AS c FROM ${qual(LogicalArea.ENTITY, custApi)} o JOIN ${qual(LogicalArea.RELATION, "${custApi}_tags")} r ON o.id = r.src_${custApi}_id",
+            emptyMap<String, Any>(),
+        )
+        jdbc().queryForList(
+            "SELECT count(*) AS c FROM ${qual(LogicalArea.METADATA, "md_object")} o JOIN ${qual(LogicalArea.METADATA, "md_field")} f ON o.id = f.object_id",
+            emptyMap<String, Any>(),
+        )
     }
 }

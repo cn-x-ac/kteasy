@@ -63,6 +63,13 @@ data class PhysicalColumn(
     val nullable: Boolean = true,
     val primaryKey: Boolean = false,
     val default: ColumnDefault? = null,
+    /**
+     * 标识符列（id / 各类引用列）显式钉 binary 排序规则（PG `COLLATE "C"`、MySQL `COLLATE utf8mb4_bin`）。
+     *
+     * 禁用库/表默认：ci/ai 不该用于标识符，binary 比较退化为 memcmp，且 ci 字典序打乱 ULID
+     * 「按 id 排＝按时间排」（M1-03 设计要点 7）。FK/JOIN 两端须同此规则，否则撞 `Illegal mix of collations`。
+     */
+    val binaryCollation: Boolean = false,
 ) {
     init {
         require(name.isNotBlank()) { "列名不能为空" }
@@ -70,6 +77,7 @@ data class PhysicalColumn(
             require(length != null && length > 0) { "VARCHAR 列 [$name] 必须给定 length" }
         }
         require(!(primaryKey && nullable)) { "主键列 [$name] 不得可空" }
+        require(!(binaryCollation && type != ColumnType.VARCHAR)) { "仅字符串列可钉 binary 排序规则：[$name]" }
     }
 }
 

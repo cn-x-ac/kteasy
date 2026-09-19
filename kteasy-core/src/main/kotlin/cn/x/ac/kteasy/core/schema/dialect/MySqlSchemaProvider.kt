@@ -280,10 +280,11 @@ private object MyIntrospection : IntrospectionOps {
     override fun listColumns(
         area: LogicalArea,
         table: String,
-    ): Fragment = Fragment(
-        "SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = :$T ORDER BY ordinal_position",
-        mapOf(T to area.mysqlPrefix + table),
-    )
+    ): Fragment =
+        Fragment(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = :$T ORDER BY ordinal_position",
+            mapOf(T to area.mysqlPrefix + table),
+        )
 
     private const val T = "__kteasy_t"
     private const val C = "__kteasy_c"
@@ -293,6 +294,7 @@ private object MyIntrospection : IntrospectionOps {
 /** MySQL 单列定义（含 NOT NULL / DEFAULT）；主键改由表级 `PRIMARY KEY` 约束。 */
 private fun PhysicalColumn.toMySqlColumnDef(): String {
     val sb = StringBuilder("$name ${type.toMySqlType(length)}")
+    if (binaryCollation) sb.append(" COLLATE utf8mb4_bin")
     if (!nullable && !primaryKey) sb.append(" NOT NULL")
     when (val d = default) {
         null -> Unit

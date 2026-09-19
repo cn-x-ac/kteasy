@@ -261,10 +261,11 @@ private object PgIntrospection : IntrospectionOps {
     override fun listColumns(
         area: LogicalArea,
         table: String,
-    ): Fragment = Fragment(
-        "SELECT column_name FROM information_schema.columns WHERE table_schema = :$S AND table_name = :$T ORDER BY ordinal_position",
-        mapOf(S to area.pgSchema, T to area.pgPrefix + table),
-    )
+    ): Fragment =
+        Fragment(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = :$S AND table_name = :$T ORDER BY ordinal_position",
+            mapOf(S to area.pgSchema, T to area.pgPrefix + table),
+        )
 
     private const val S = "__kteasy_s"
     private const val T = "__kteasy_t"
@@ -275,6 +276,7 @@ private object PgIntrospection : IntrospectionOps {
 /** PG 单列定义（含 NOT NULL / DEFAULT）；主键不在此内联，改由表级 `PRIMARY KEY` 约束。 */
 private fun PhysicalColumn.toPgColumnDef(): String {
     val sb = StringBuilder("$name ${type.toPgType(length)}")
+    if (binaryCollation) sb.append(" COLLATE \"C\"")
     if (!nullable && !primaryKey) sb.append(" NOT NULL")
     when (val d = default) {
         null -> Unit

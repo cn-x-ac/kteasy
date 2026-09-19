@@ -12,6 +12,8 @@ springBoot = "4.1.1"
 # 合规骨架：spotless 强制【规格】§1.4 版权头 + ktlint 统一 Kotlin 风格
 spotless = "8.10.2"
 ktlint = "1.8.0"
+# 架构门禁（M1-02 红线④⑤）：把「方言只在 core.schema.dialect、业务层不触 SQL 字面量/具体方言类」变成 CI 断言
+archunit = "1.4.0"
 
 [libraries]
 # --- build-logic 约定插件编译期需要的插件载体（模块内不引用） ---
@@ -48,6 +50,8 @@ flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql
 flyway-mysql = { module = "org.flywaydb:flyway-mysql" }
 # 元数据图谱缓存（M1-01）：Caffeine 单飞加载；版本由 Boot BOM 平台统一管理
 caffeine = { module = "com.github.ben-manes.caffeine:caffeine" }
+# 架构门禁（M1-02）：ArchUnit 核心 API（不引 junit5 扩展，用普通 JUnit 测试直接 evaluate 规则）
+archunit = { module = "com.tngtech.archunit:archunit", version.ref = "archunit" }
 
 [bundles]
 # 全模块通用的单元测试栈（L1 纯函数单测的地基）

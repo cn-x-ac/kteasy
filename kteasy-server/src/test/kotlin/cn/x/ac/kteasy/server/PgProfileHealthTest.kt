@@ -45,7 +45,10 @@ class PgProfileHealthTest {
             .contains("\"status\":\"UP\"")
             .contains("\"dialect\":\"pg\"")
             .contains("\"version\":\"")
-            .contains("\"capabilities\":[]")
+            .contains("\"capabilities\":[")
+            .doesNotContain("\"capabilities\":[]")
+            .contains("TRANSACTIONAL_DDL")
+            .contains("JSON_GIN_INDEX")
             .contains("\"clock\":\"")
         // Profile 确实注入到方言与连接串，二者一致
         assertThat(environment.getProperty("kteasy.db.dialect")).isEqualTo("pg")

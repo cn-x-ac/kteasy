@@ -1,30 +1,31 @@
--- V3：md 区元数据模型 6 张表（模块图纸 01 §1，MySQL 前缀 md_）。PG 对应版本同目录 V3，
--- 列集逻辑等价（jsonb↔json、timestamptz↔DATETIME(6)、boolean↔TINYINT(1)）。
--- md_dep / md_autonum_rule 归 M1-07（recalc 依赖图与编号规则）建表，本卡不提前。
--- storage_kind 取值含 N2N（多引用落 r_* 关联表、既无真列也不进 ext；图纸 01 §2 已回写）。
+-- V3（M1-03 压扁收尾）：md 区元数据模型 6 张表（模块图纸 01 §1，MySQL 前缀 md_）。
+-- 折入原 V4（display_name，不再建 name_field_id）、原 V6（id/引用列钉 COLLATE utf8mb4_bin）。
+-- 列集与 PG 版逻辑等价（json↔jsonb、DATETIME(6)↔timestamptz、TINYINT(1)↔boolean）。
+-- md_dep / md_autonum_rule 归 M1-07 建表；storage_kind 含 N2N（落 r_* 关联表，图纸 01 §2）。
+-- binary 规则：仅 id 及引用列钉 utf8mb4_bin；api_name/label/kind/path 等非标识符列吃表默认 utf8mb4_0900_ai_ci。
 
 CREATE TABLE md_object (
-    id                varchar(32)  NOT NULL,
+    id                varchar(32)  COLLATE utf8mb4_bin NOT NULL,
     api_name          varchar(64)  NOT NULL,
     label             varchar(191) NOT NULL,
     kind              varchar(16)  NOT NULL,
-    parent_object_id  varchar(32),
-    name_field_id     varchar(32),
+    parent_object_id  varchar(32)  COLLATE utf8mb4_bin,
+    display_name      varchar(255),
     quick_search_json json,
     status            varchar(16)  NOT NULL DEFAULT 'ACTIVE',
     disabled          boolean      NOT NULL DEFAULT false,
     created_at        datetime(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    created_by        varchar(32)  NOT NULL,
+    created_by        varchar(32)  COLLATE utf8mb4_bin NOT NULL,
     updated_at        datetime(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-    updated_by        varchar(32)  NOT NULL,
+    updated_by        varchar(32)  COLLATE utf8mb4_bin NOT NULL,
     PRIMARY KEY (id),
     CONSTRAINT uk_md_object_api_name UNIQUE (api_name),
     CONSTRAINT ck_md_object_kind CHECK (kind IN ('PARENT', 'CHILD', 'PLAIN'))
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE md_field (
-    id                varchar(32)  NOT NULL,
-    object_id         varchar(32)  NOT NULL,
+    id                varchar(32)  COLLATE utf8mb4_bin NOT NULL,
+    object_id         varchar(32)  COLLATE utf8mb4_bin NOT NULL,
     api_name          varchar(64)  NOT NULL,
     label             varchar(191) NOT NULL,
     logical_type      varchar(24)  NOT NULL,
@@ -33,10 +34,10 @@ CREATE TABLE md_field (
     default_json      json,
     validation_json   json,
     ui_json           json,
-    ref_object_id     varchar(32),
+    ref_object_id     varchar(32)  COLLATE utf8mb4_bin,
     ref_any_objs_json json,
-    dict_id           varchar(32),
-    option_set_id     varchar(32),
+    dict_id           varchar(32)  COLLATE utf8mb4_bin,
+    option_set_id     varchar(32)  COLLATE utf8mb4_bin,
     seq               integer      NOT NULL DEFAULT 0,
     enabled           boolean      NOT NULL DEFAULT true,
     created_at        datetime(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -49,16 +50,16 @@ CREATE TABLE md_field (
 CREATE INDEX ix_md_field_object ON md_field (object_id);
 
 CREATE TABLE md_dict (
-    id         varchar(32)  NOT NULL,
+    id         varchar(32)  COLLATE utf8mb4_bin NOT NULL,
     name       varchar(191) NOT NULL,
     created_at datetime(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE md_dict_item (
-    id        varchar(32)  NOT NULL,
-    dict_id   varchar(32)  NOT NULL,
-    parent_id varchar(32),
+    id        varchar(32)  COLLATE utf8mb4_bin NOT NULL,
+    dict_id   varchar(32)  COLLATE utf8mb4_bin NOT NULL,
+    parent_id varchar(32)  COLLATE utf8mb4_bin,
     path      varchar(512) NOT NULL,
     p_label   varchar(191) NOT NULL,
     seq       integer      NOT NULL DEFAULT 0,
@@ -71,7 +72,7 @@ CREATE TABLE md_dict_item (
 CREATE INDEX ix_md_dict_item_dict ON md_dict_item (dict_id);
 
 CREATE TABLE md_option_set (
-    id         varchar(32)  NOT NULL,
+    id         varchar(32)  COLLATE utf8mb4_bin NOT NULL,
     name       varchar(191) NOT NULL,
     closed     boolean      NOT NULL DEFAULT false,
     created_at datetime(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -79,8 +80,8 @@ CREATE TABLE md_option_set (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE md_option (
-    id      varchar(32)  NOT NULL,
-    set_id  varchar(32)  NOT NULL,
+    id      varchar(32)  COLLATE utf8mb4_bin NOT NULL,
+    set_id  varchar(32)  COLLATE utf8mb4_bin NOT NULL,
     code    varchar(64)  NOT NULL,
     label   varchar(191) NOT NULL,
     seq     integer      NOT NULL DEFAULT 0,

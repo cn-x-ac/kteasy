@@ -64,7 +64,7 @@ class MetadataSchemaTest {
                         "label",
                         "kind",
                         "parent_object_id",
-                        "name_field_id",
+                        "display_name",
                         "quick_search_json",
                         "status",
                         "disabled",

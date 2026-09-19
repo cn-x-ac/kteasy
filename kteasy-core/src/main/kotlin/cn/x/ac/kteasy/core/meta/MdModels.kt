@@ -22,6 +22,9 @@ package cn.x.ac.kteasy.core.meta
 /**
  * 对象（业务实体）。`table_name` 不落库——物理表名由 api_name 经命名空间映射生成（图纸 01 §1）。
  *
+ * @property displayName 显示名称模板（占位符串，如 `{no}-{name}`；单字段即"仅一个占位符"的特例，
+ *   【清单】S10 由旧 `name_field_id` 单字段方案升级）。渲染（物化真列 vs 查询期现算）归 M1-05；
+ *   本卡只落数据模型 + 占位符校验。
  * @property quickSearchJson 快查字段 api_name 数组的原始 JSON 串（`["name","phone"]`）
  * @property status 生命周期状态（ACTIVE/ARCHIVED，⟨可逆⟩；物理表处置归 M1-03）
  */
@@ -31,7 +34,7 @@ data class MdObject(
     val label: String,
     val kind: ObjectKind,
     val parentObjectId: String? = null,
-    val nameFieldId: String? = null,
+    val displayName: String? = null,
     val quickSearchJson: String? = null,
     val status: String = "ACTIVE",
     val disabled: Boolean = false,

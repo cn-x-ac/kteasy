@@ -101,7 +101,7 @@ class MetadataValidatorTest {
         api: String = "account",
         kind: ObjectKind = ObjectKind.PARENT,
         parent: String? = null,
-        nameField: String? = "f_name",
+        displayName: String? = "{name}",
         quick: String? = null,
     ): MdObject =
         MdObject(
@@ -110,7 +110,7 @@ class MetadataValidatorTest {
             label = api,
             kind = kind,
             parentObjectId = parent,
-            nameFieldId = nameField,
+            displayName = displayName,
             quickSearchJson = quick,
         )
 
@@ -130,7 +130,7 @@ class MetadataValidatorTest {
 
     @Test
     fun `子项不挂主被拒且含人话定位`() {
-        val child = obj(api = "itm01_line", kind = ObjectKind.CHILD, nameField = "f_name")
+        val child = obj(api = "itm01_line", kind = ObjectKind.CHILD)
         val v = MetadataValidator.checkObject(child, listOf(field("name", LogicalType.TEXT)), null)
         assertTrue(v.any { it.contains("必须挂主") && it.contains("itm01_line") }, v.toString())
     }
@@ -150,25 +150,73 @@ class MetadataValidatorTest {
     }
 
     @Test
-    fun `名称字段缺失或资格不符被拒`() {
-        // 指向不存在字段
-        val v1 = MetadataValidator.checkObject(obj(nameField = "f_nope"), parentFields, null)
-        assertTrue(v1.any { it.contains("缺少名称字段") }, v1.toString())
-        // 资格不符：引用型不可主显
-        val v2 = MetadataValidator.checkObject(obj(nameField = "f_cust"), parentFields, null)
-        assertTrue(v2.any { it.contains("不能作为名称字段") && it.contains("引用") }, v2.toString())
-        // 停用字段不可主显
+    fun `显示名称模板 - 缺模板与占位符违规逐条命中`() {
+        // 缺模板
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = ""), parentFields, null)
+                .any { it.contains("缺少显示名称模板") },
+        )
+        // 占位符首跳指向不存在字段/列
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{ghost}"), parentFields, null)
+                .any { it.contains("首跳 [ghost]") },
+        )
+        // 停用字段不可作片段
         val disabled = listOf(field("name", LogicalType.TEXT).copy(enabled = false), parentFields[1], parentFields[2])
-        val v3 = MetadataValidator.checkObject(obj(nameField = "f_name"), disabled, null)
-        assertTrue(v3.any { it.contains("已停用") }, v3.toString())
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{name}"), disabled, null)
+                .any { it.contains("非本对象启用字段或系统列") },
+        )
+        // 花括号不配平
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{name"), parentFields, null)
+                .any { it.contains("花括号不配平") },
+        )
     }
 
     @Test
-    fun `名称字段资格白名单逐型断言`() {
-        val allowed = MetadataValidator.NAME_FIELD_TYPES.map { it.name }.toSet()
-        assertEquals(
-            setOf("TEXT", "PHONE", "EMAIL", "URL", "AUTONUM", "NUMBER", "DECIMAL", "DATE", "DATETIME"),
-            allowed,
+    fun `显示名称模板 - 引用型可作片段 类型白名单已作废 多占位符合法`() {
+        // 引用字段 cust 作片段不再被拒（S10：任何字段可作片段）
+        assertEquals(emptyList(), MetadataValidator.checkObject(obj(displayName = "{cust}"), parentFields, null))
+        // 多占位符 + 文本混排合法
+        assertEquals(emptyList(), MetadataValidator.checkObject(obj(displayName = "{name}-{amount}"), parentFields, null))
+        // 纯静态文本（无占位符）亦合法
+        assertEquals(emptyList(), MetadataValidator.checkObject(obj(displayName = "客户"), parentFields, null))
+    }
+
+    @Test
+    fun `显示名称模板 - 级联点链`() {
+        // 经引用字段级联（首跳 cust=REF；深跳金额由 M1-05 点链解析，本卡不校验其存在性）
+        assertEquals(emptyList(), MetadataValidator.checkObject(obj(displayName = "{cust.amount}"), parentFields, null))
+        // 经引用型系统列级联：owner_dept → 目标对象字段（如部门负责人 {owner_dept.leader}）
+        assertEquals(emptyList(), MetadataValidator.checkObject(obj(displayName = "{owner_dept.leader}"), parentFields, null))
+        // 首跳是标量字段（name=TEXT）不可点下去
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{name.x}"), parentFields, null)
+                .any { it.contains("不是引用/关联型") },
+        )
+        // 超过 3 跳（cust.a.b.c.d = 4 跳）被拒
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{cust.a.b.c.d}"), parentFields, null)
+                .any { it.contains("级联超过 3 跳") },
+        )
+        // 空路径段
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{name..x}"), parentFields, null)
+                .any { it.contains("空路径段") },
+        )
+        // 未知首跳（既非字段亦非系统列）
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{ghost.x}"), parentFields, null)
+                .any { it.contains("首跳 [ghost]") },
         )
     }
 

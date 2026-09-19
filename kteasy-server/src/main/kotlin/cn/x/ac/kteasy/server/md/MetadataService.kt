@@ -71,7 +71,7 @@ class MetadataService(
         val label: String,
         val kind: String,
         val parentApi: String? = null,
-        val nameFieldApi: String,
+        val displayName: String,
         val quickSearchFields: List<String> = emptyList(),
         val fields: List<FieldCmd> = emptyList(),
     )
@@ -81,7 +81,7 @@ class MetadataService(
         val status: String? = null,
         val disabled: Boolean? = null,
         val quickSearchFields: List<String>? = null,
-        val nameFieldApi: String? = null,
+        val displayName: String? = null,
     )
 
     data class FieldUpdateCmd(
@@ -112,7 +112,6 @@ class MetadataService(
             // 对象与字段的 objectId 必须同源：先生成对象 id，再逐字段绑定（禁每字段各取新 ULID）
             val objectId = Ulid.next()
             val fields = cmd.fields.map { buildField(objectId, it, fields = emptyList()) }
-            val nameFieldId = fields.firstOrNull { it.apiName == cmd.nameFieldApi }?.id
             val obj =
                 MdObject(
                     id = objectId,
@@ -120,7 +119,7 @@ class MetadataService(
                     label = cmd.label,
                     kind = kind,
                     parentObjectId = parent?.id,
-                    nameFieldId = nameFieldId,
+                    displayName = cmd.displayName,
                     quickSearchJson = toJsonArray(cmd.quickSearchFields),
                     createdBy = systemActor,
                     updatedBy = systemActor,
@@ -139,17 +138,12 @@ class MetadataService(
         mdWrite(MetadataAction.OBJECT_UPDATED, api) {
             val existing = requireObject(api)
             val fields = repository.listFieldsByObjectId(existing.id)
-            val nameFieldId =
-                cmd.nameFieldApi?.let { fieldApi ->
-                    fields.firstOrNull { it.apiName == fieldApi }?.id
-                        ?: throw badRequest(listOf("名称字段 [$fieldApi] 不在本对象字段中"))
-                }
             val updated =
                 existing.copy(
                     label = cmd.label ?: existing.label,
                     status = cmd.status ?: existing.status,
                     disabled = cmd.disabled ?: existing.disabled,
-                    nameFieldId = nameFieldId ?: existing.nameFieldId,
+                    displayName = cmd.displayName ?: existing.displayName,
                     quickSearchJson =
                         cmd.quickSearchFields?.let { toJsonArray(it) } ?: existing.quickSearchJson,
                 )
@@ -160,7 +154,7 @@ class MetadataService(
                 label = cmd.label,
                 status = cmd.status,
                 disabled = cmd.disabled,
-                nameFieldId = nameFieldId,
+                displayName = cmd.displayName,
                 quickSearchJson = cmd.quickSearchFields?.let { toJsonArray(it) },
                 updatedBy = systemActor,
             )
@@ -194,7 +188,7 @@ class MetadataService(
                     id = newObjectId,
                     apiName = cmd.apiName,
                     label = cmd.label,
-                    nameFieldId = source.nameFieldId?.let { idMap[it] },
+                    displayName = source.displayName,
                     status = "ACTIVE",
                     disabled = false,
                     createdBy = systemActor,

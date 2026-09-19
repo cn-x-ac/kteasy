@@ -105,8 +105,12 @@ jobs:
         with:
           cache-read-only: false
 
-      - name: 双库启动 smoke（Flyway V1/V2 迁移 + 列类型映射 + JDBC 探活并发）
+      - name: 双库启动 smoke + 元数据/方言 SPI 矩阵（Flyway V1–V4 · 列类型映射 · JDBC 探活 · md 治理面 · M1-02 双库等价/EXPLAIN）
         run: |
           ./gradlew --no-daemon :kteasy-server:test \
             --tests "cn.x.ac.kteasy.server.FlywayMigrationsTest" \
-            --tests "cn.x.ac.kteasy.server.DataSourceProbeSmokeTest"
+            --tests "cn.x.ac.kteasy.server.DataSourceProbeSmokeTest" \
+            --tests "cn.x.ac.kteasy.server.md.MetadataSchemaTest" \
+            --tests "cn.x.ac.kteasy.server.md.MetadataGovernanceApiTest" \
+            --tests "cn.x.ac.kteasy.server.md.MetadataCacheConcurrencyTest" \
+            --tests "cn.x.ac.kteasy.server.dialect.SchemaProviderMatrixTest"

@@ -43,6 +43,8 @@ dependencies {
     testImplementation(platform(libs.spring.boot.dependencies))
     testImplementation(libs.spring.boot.starter.test.classic)
     testImplementation(libs.bundles.unit.test)
+    // M1-02 架构门禁（红线④⑤）：把方言隔离变成 CI 断言
+    testImplementation(libs.archunit)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 

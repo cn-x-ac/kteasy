@@ -1,7 +1,8 @@
--- V2：物化引擎作业账本（MySQL 用表前缀 md_ 落 md 区）。列集与 PG 版按逻辑类型等价。
+-- V2（M1-03 压扁收尾）：物化引擎作业账本（MySQL 前缀 md_）。列集与 PG 版逻辑等价。
+-- 原 V6/V7 回补已折进此处：object_id 存 md_object.id，列级钉 COLLATE utf8mb4_bin（与主表同规则防 JOIN Illegal mix）。
 CREATE TABLE md_schema_change_job (
     id              BIGINT      NOT NULL AUTO_INCREMENT,
-    object_id       VARCHAR(64) NOT NULL,
+    object_id       VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
     step_kind       VARCHAR(32) NOT NULL,
     seq             INT         NOT NULL,
     state           VARCHAR(16) NOT NULL,

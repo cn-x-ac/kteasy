@@ -117,6 +117,26 @@ class SchemaJobRepository(
 
     fun listByObject(objectId: String): List<SchemaJob> = jdbc.query("SELECT * FROM $table WHERE object_id = :oid ORDER BY id", mapOf("oid" to objectId), rowMapper)
 
+    /** 入队一条待发步并写入其参数 JSON（物化作业据此在重启后精确续跑，不依赖元数据重推导）。 */
+    fun insertPending(
+        objectId: String,
+        kind: StepKind,
+        seq: Int,
+        paramsJson: String?,
+    ): Long {
+        val id = insert(objectId, kind, seq)
+        if (paramsJson != null) writeCheckpoint(id, paramsJson)
+        return id
+    }
+
+    /** 该对象全部未到终态（state<>DONE）的步，按 (seq, id) 升序——供执行器回放未完成的物理化步。 */
+    fun listUnfinishedByObject(objectId: String): List<SchemaJob> =
+        jdbc.query(
+            "SELECT * FROM $table WHERE object_id = :oid AND state <> 'DONE' ORDER BY seq, id",
+            mapOf("oid" to objectId),
+            rowMapper,
+        )
+
     /** 该对象是否仍有未到终态（PENDING/RUNNING/FAILED）的步。 */
     fun hasUnfinished(objectId: String): Boolean =
         jdbc.queryForObject(

@@ -130,8 +130,8 @@ private object MyIndexOps : IndexOps {
         name: String,
         online: Boolean,
     ): List<DdlStatement> {
-        val tail = if (online) " ALGORITHM=INPLACE, LOCK=NONE" else ""
-        return listOf(DdlStatement("CREATE INDEX $name ON $table (($expressionSql))$tail"))
+        val tail = if (online) ", ALGORITHM=INPLACE, LOCK=NONE" else ""
+        return listOf(DdlStatement("ALTER TABLE $table ADD INDEX $name (($expressionSql))$tail"))
     }
 
     override fun createJsonArrayIndex(

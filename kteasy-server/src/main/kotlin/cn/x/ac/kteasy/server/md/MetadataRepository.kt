@@ -290,6 +290,17 @@ class MetadataRepository(
         )
     }
 
+    /** 受控翻转字段 `storage_kind`：物化引擎 SWITCH_READ 回填完成时把标量读判据 EXT→COLUMN（M1-04 type-convert 复用）。 */
+    fun setFieldStorageKind(
+        id: String,
+        storageKind: StorageKind,
+    ) {
+        jdbc.update(
+            "UPDATE ${table("md_field")} SET storage_kind = :sk WHERE id = :id",
+            mapOf("sk" to storageKind.name, "id" to id),
+        )
+    }
+
     // ---------- 字典 / 选项集（快照全量加载 + 图谱引用） ----------
 
     fun listAllDicts(): List<MdDict> = query("SELECT id, name FROM ${table("md_dict")} ORDER BY created_at", emptyMap(), dictMapper)

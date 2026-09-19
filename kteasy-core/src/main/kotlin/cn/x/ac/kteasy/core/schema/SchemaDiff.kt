@@ -111,6 +111,7 @@ sealed class StepOp {
         val hostTable: String,
         val targetColumn: String,
         val expressionSourceColumn: String,
+        val cast: ValueCast,
         val batchSize: Int,
     ) : StepOp()
 
@@ -419,7 +420,7 @@ object SchemaDiff {
     ): List<SchemaStep> {
         val steps = mutableListOf<SchemaStep>()
         steps += step(objectId, StepKind.ADD_VIRTUAL_COLUMN, StepOp.AddVirtualColumn(LogicalArea.ENTITY, hostTable, column, fieldApi, makeIndex))
-        steps += step(objectId, StepKind.BACKFILL_BATCH, StepOp.BackfillBatch(LogicalArea.ENTITY, hostTable, fieldApi, fieldApi, BACKFILL_BATCH_SIZE))
+        steps += step(objectId, StepKind.BACKFILL_BATCH, StepOp.BackfillBatch(LogicalArea.ENTITY, hostTable, fieldApi, fieldApi, cast, BACKFILL_BATCH_SIZE))
         if (makeIndex) {
             steps += step(objectId, StepKind.ADD_INDEX_EXPR, StepOp.AddIndexExpr(LogicalArea.ENTITY, hostTable, "ix_${hostTable}_$fieldApi", "ext", listOf(fieldApi), cast, online = true))
         }

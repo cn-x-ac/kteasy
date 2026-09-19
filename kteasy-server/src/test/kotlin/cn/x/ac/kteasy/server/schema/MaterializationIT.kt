@@ -211,5 +211,11 @@ class MaterializationIT {
             "SELECT count(*) AS c FROM ${qual(LogicalArea.METADATA, "md_object")} o JOIN ${qual(LogicalArea.METADATA, "md_field")} f ON o.id = f.object_id",
             emptyMap<String, Any>(),
         )
+        // V7 补全：作业账本 object_id（存 md_object.id）亦钉 binary，与 md_object.id 联查不混。
+        assertThat(collationOf(LogicalArea.METADATA, "md_schema_change_job", "object_id")).`as`("账本 object_id 钉 binary").isEqualTo(bin)
+        jdbc().queryForList(
+            "SELECT count(*) AS c FROM ${qual(LogicalArea.METADATA, "md_schema_change_job")} j JOIN ${qual(LogicalArea.METADATA, "md_object")} o ON j.object_id = o.id",
+            emptyMap<String, Any>(),
+        )
     }
 }

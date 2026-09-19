@@ -1,3 +1,0 @@
--- V5（M1-03）：MySQL 侧无实质变更，仅与 PG 对齐版本号。
--- V2 已按 md_schema_change_job 建表，本就符合元数据命名约定；PG 侧同版本 V5 才做重命名。
--- 空操作迁移（无 DDL/DML），Flyway 照常记录 V5 成功，保持两库 applied 版本列表一致。

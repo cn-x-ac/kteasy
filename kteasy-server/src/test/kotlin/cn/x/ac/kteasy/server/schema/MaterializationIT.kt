@@ -202,7 +202,7 @@ class MaterializationIT {
         }
 
         // JOIN/FK 两端 collation 一致 → 不出现 Illegal mix of collations（MySQL 会直接抛）。
-        // 对象表 ⋈ 其 r_ 关联表；以及 md_object ⋈ md_field（验证 V6 对 md 区的回补）。
+        // 对象表 ⋈ 其 r_ 关联表；以及 md_object ⋈ md_field（框架表建表即内联钉 binary，压扁后无回补迁移）。
         jdbc().queryForList(
             "SELECT count(*) AS c FROM ${qual(LogicalArea.ENTITY, custApi)} o JOIN ${qual(LogicalArea.RELATION, "${custApi}_tags")} r ON o.id = r.src_${custApi}_id",
             emptyMap<String, Any>(),
@@ -211,7 +211,7 @@ class MaterializationIT {
             "SELECT count(*) AS c FROM ${qual(LogicalArea.METADATA, "md_object")} o JOIN ${qual(LogicalArea.METADATA, "md_field")} f ON o.id = f.object_id",
             emptyMap<String, Any>(),
         )
-        // V7 补全：作业账本 object_id（存 md_object.id）亦钉 binary，与 md_object.id 联查不混。
+        // 作业账本 object_id（存 md_object.id）建表即钉 binary（V2 CREATE 内联），与 md_object.id 联查不混。
         assertThat(collationOf(LogicalArea.METADATA, "md_schema_change_job", "object_id")).`as`("账本 object_id 钉 binary").isEqualTo(bin)
         jdbc().queryForList(
             "SELECT count(*) AS c FROM ${qual(LogicalArea.METADATA, "md_schema_change_job")} j JOIN ${qual(LogicalArea.METADATA, "md_object")} o ON j.object_id = o.id",

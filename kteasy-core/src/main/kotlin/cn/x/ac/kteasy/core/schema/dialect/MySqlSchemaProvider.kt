@@ -220,6 +220,18 @@ private object MyTableOps : TableOps {
         name: String,
     ): DdlStatement = DdlStatement("DROP TABLE IF EXISTS ${area.mysqlPrefix}$name")
 
+    override fun addColumn(
+        table: String,
+        column: PhysicalColumn,
+    ): List<DdlStatement> {
+        val col = column.toMySqlColumnDef()
+        // 首选 INSTANT（表末尾加列、可空免锁），次选 INPLACE,LOCK=NONE 兜底——执行器逐条探测回退（M1-03）。
+        return listOf(
+            DdlStatement("ALTER TABLE $table ADD COLUMN $col, ALGORITHM=INSTANT"),
+            DdlStatement("ALTER TABLE $table ADD COLUMN $col, ALGORITHM=INPLACE, LOCK=NONE"),
+        )
+    }
+
     override fun addForeignKey(spec: ForeignKeySpec): DdlStatement = DdlStatement("ALTER TABLE ${spec.hostArea.mysqlPrefix}${spec.hostTable} ADD CONSTRAINT ${spec.name} ${myFkClause(spec)}")
 
     private fun myFkClause(spec: ForeignKeySpec): String = "FOREIGN KEY (${spec.column}) REFERENCES ${spec.refArea.mysqlPrefix}${spec.refTable} (${spec.refColumn})"

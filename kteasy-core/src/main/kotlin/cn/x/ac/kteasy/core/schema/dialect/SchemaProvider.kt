@@ -165,6 +165,18 @@ interface TableOps {
     /** 建表：返回**有序**语句序列（PG 首条可能为确保 schema 存在，随后单条 `CREATE TABLE`）。 */
     fun createTable(spec: TableSpec): List<DdlStatement>
 
+    /**
+     * 为已存在表加一列（真列化：REF 引用列 / DICT 路径列 / ANYREF 伴生列 / 物理化字段）。
+     *
+     * 与 [ColumnOps.addNullableColumn] 的区别：这里按 [PhysicalColumn] 的显式类型（如 `varchar(32)`）建列——
+     * 引用列须定长才能挂 FK（MySQL TEXT 不可作外键列）。返回**按优先级排列**的候选：MySQL 首选
+     * `ALGORITHM=INSTANT`、次选 `INPLACE`（执行器逐条探测回退）；PG 单条即成。[table] 已限定。
+     */
+    fun addColumn(
+        table: String,
+        column: PhysicalColumn,
+    ): List<DdlStatement>
+
     /** 删表（`DROP TABLE IF EXISTS`，幂等）。破坏性由执行器的引用检查把关。 */
     fun dropTable(
         area: LogicalArea,

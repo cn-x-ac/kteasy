@@ -201,6 +201,11 @@ private object PgTableOps : TableOps {
         name: String,
     ): DdlStatement = DdlStatement("DROP TABLE IF EXISTS ${pgQualify(area, name)}")
 
+    override fun addColumn(
+        table: String,
+        column: PhysicalColumn,
+    ): List<DdlStatement> = listOf(DdlStatement("ALTER TABLE $table ADD COLUMN ${column.toPgColumnDef()}"))
+
     override fun addForeignKey(spec: ForeignKeySpec): DdlStatement = DdlStatement("ALTER TABLE ${pgQualify(spec.hostArea, spec.hostTable)} ADD CONSTRAINT ${spec.name} ${pgFkClause(spec)}")
 
     /** 逻辑区 + 逻辑名 → PG 限定名（与 [PgNamespace] 同规则，独立于此扩展点内的私有对象）。 */

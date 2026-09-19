@@ -66,7 +66,7 @@ class MetadataCacheConcurrencyTest {
                     apiName = parentApi,
                     label = "并发压测对象",
                     kind = "PLAIN",
-                    nameFieldApi = "name",
+                    displayName = "{name}",
                     fields = listOf(FieldCmd(apiName = "name", label = "名称", logicalType = "TEXT")),
                 ),
             )

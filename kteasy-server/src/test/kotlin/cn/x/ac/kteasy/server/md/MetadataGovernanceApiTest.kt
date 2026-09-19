@@ -117,7 +117,7 @@ class MetadataGovernanceApiTest {
             client.post(
                 "/api/md/object",
                 """
-                {"api_name":"$custApi","label":"客户","kind":"PLAIN","name_field":"name",
+                {"api_name":"$custApi","label":"客户","kind":"PLAIN","display_name":"{name}",
                  "fields":[${field("name", "TEXT")},${field("credit", "NUMBER")}]}
                 """.trimIndent(),
             )
@@ -147,7 +147,7 @@ class MetadataGovernanceApiTest {
             client.post(
                 "/api/md/object",
                 """
-                {"api_name":"$parentApi","label":"主对象","kind":"PARENT","name_field":"name",
+                {"api_name":"$parentApi","label":"主对象","kind":"PARENT","display_name":"{name}",
                  "quick_search_fields":["name","phone"],
                  "fields":[${(scalars + refField).joinToString(",")}]}
                 """.trimIndent(),
@@ -161,7 +161,7 @@ class MetadataGovernanceApiTest {
                 "/api/md/object",
                 """
                 {"api_name":"$childApi","label":"子项","kind":"CHILD","parent_object":"$parentApi",
-                 "name_field":"name","fields":[${field("name", "TEXT")},${field("qty", "NUMBER")}]}
+                 "display_name":"{name}","fields":[${field("name", "TEXT")},${field("qty", "NUMBER")}]}
                 """.trimIndent(),
             )
         assertThat(childResp.status).isEqualTo(200)
@@ -199,7 +199,7 @@ class MetadataGovernanceApiTest {
             client.post(
                 "/api/md/object",
                 """
-                {"api_name":"m01orphan$s","label":"孤儿","kind":"CHILD","name_field":"name",
+                {"api_name":"m01orphan$s","label":"孤儿","kind":"CHILD","display_name":"{name}",
                  "fields":[${field("name", "TEXT")}]}
                 """.trimIndent(),
             )
@@ -207,7 +207,7 @@ class MetadataGovernanceApiTest {
         assertThat(noParent.body).contains("\"error_code\":420")
         assertThat(noParent.body).contains("必须挂主")
         // 重复 api_name
-        val dup = client.post("/api/md/object", """{"api_name":"$custApi","label":"x","kind":"PLAIN","name_field":"name","fields":[${field("name", "TEXT")}]}""")
+        val dup = client.post("/api/md/object", """{"api_name":"$custApi","label":"x","kind":"PLAIN","display_name":"{name}","fields":[${field("name", "TEXT")}]}""")
         assertThat(dup.status).isEqualTo(409)
         assertThat(dup.body).contains("\"error_code\":420")
         assertThat(dup.body).contains("已存在")
@@ -269,8 +269,8 @@ class MetadataGovernanceApiTest {
         assertThat(copyFields.first { it.apiName == "cust" }.refObjectId)
             .isEqualTo(sourceFields.first { it.apiName == "cust" }.refObjectId)
         assertThat(graph.body).contains("\"logicalType\":\"REF\"")
-        // 名称字段重映射到副本自身字段
-        assertThat(graph.body).contains("\"nameFieldId\"")
+        // 显示名称模板逐字随副本复用（占位符按 api_name 引用，副本 api_name 不变）
+        assertThat(graph.body).contains("\"displayName\":\"{name}\"")
     }
 
     private fun countFields(objectApi: String): Int {

@@ -15,6 +15,8 @@
  */
 package cn.x.ac.kteasy.server.web
 
+import cn.x.ac.kteasy.core.kernel.KteasyContext
+import cn.x.ac.kteasy.core.schema.dialect.SchemaProvider
 import cn.x.ac.kteasy.server.md.MetadataGraphCache
 import cn.x.ac.kteasy.server.md.MetadataService
 import cn.x.ac.kteasy.server.md.MetadataService.CopyCmd
@@ -44,6 +46,8 @@ import org.springframework.web.bind.annotation.RestController
 class MdGovernanceController(
     private val service: MetadataService,
     private val cache: MetadataGraphCache,
+    private val provider: SchemaProvider,
+    private val context: KteasyContext,
 ) {
     // ---------- 对象 ----------
 
@@ -161,6 +165,20 @@ class MdGovernanceController(
 
     @GetMapping("/version")
     fun version(): ResponseEntity<Map<String, Any?>> = ok(mapOf("version" to cache.currentVersion()))
+
+    /** 方言能力台账（含 SUPPORTS/DEGRADED/ABSENT 与说明）：供 UI 如实显示「此后端下哪些功能弱化」（图纸 02 §2）。 */
+    @GetMapping("/capabilities")
+    fun capabilities(): ResponseEntity<Map<String, Any?>> {
+        val ledger =
+            provider.ledger().map {
+                mapOf(
+                    "capability" to it.capability.name,
+                    "level" to it.level.name,
+                    "note" to it.note,
+                )
+            }
+        return ok(mapOf("dialect" to context.dialect.profile, "capabilities" to ledger))
+    }
 
     // ---------- 内部 ----------
 

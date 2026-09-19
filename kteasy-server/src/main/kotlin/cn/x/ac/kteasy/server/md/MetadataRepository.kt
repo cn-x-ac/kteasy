@@ -26,6 +26,8 @@ import cn.x.ac.kteasy.core.meta.MdOption
 import cn.x.ac.kteasy.core.meta.MdOptionSet
 import cn.x.ac.kteasy.core.meta.ObjectKind
 import cn.x.ac.kteasy.core.meta.StorageKind
+import cn.x.ac.kteasy.core.schema.dialect.LogicalArea
+import cn.x.ac.kteasy.core.schema.dialect.SchemaProvider
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -35,13 +37,24 @@ import org.springframework.stereotype.Repository
  * md 区元数据 DAO（V3 六表）。**全部参数化**（【规格】§8-④ 的 md 区延伸口径：
  * 引擎元数据读写也只准占位符，动态实体数据的 SQL 归 query/schema 两模块——M1-05/06 落地）。
  *
- * JSON 列在模型层保持原始串；写入占位符经 [MdNamespace.jsonPlaceholder] 做方言翻译。
+ * 表名的「PG schema 限定 vs MySQL 前缀」、JSON 列写入的「PG 需显式 jsonb 类型转换 vs MySQL 直接收字符串」
+ * 两处方言差异，M1-02 起一律经注入的 [SchemaProvider]（[LogicalArea.METADATA] + [JsonOps.bindJson]），
+ * M1-01 遗留的 `MdNamespace` 过渡债已收编删除——本类不出现任何 `if (isMySQL)`（红线⑤）。
  */
 @Repository
 class MetadataRepository(
     private val jdbc: NamedParameterJdbcTemplate,
-    private val ns: MdNamespace,
+    provider: SchemaProvider,
 ) {
+    private val namespace = provider.namespace
+    private val json = provider.json
+
+    /** 逻辑表名 → 该方言物理限定名（元数据区；方言差异只在 SchemaProvider 内）。 */
+    private fun table(logical: String): String = namespace.qualified(LogicalArea.METADATA, logical)
+
+    /** JSON 写入占位符（PG 显式 CAST、MySQL 直取）。 */
+    private fun jsonPh(param: String): String = json.bindJson(param)
+
     // ---------- RowMapper ----------
 
     private val objectMapper =
@@ -100,12 +113,12 @@ class MetadataRepository(
     fun insertObject(o: MdObject) {
         jdbc.update(
             """
-            INSERT INTO ${ns.table("md_object")}
+            INSERT INTO ${table("md_object")}
                 (id, api_name, label, kind, parent_object_id, name_field_id,
                  quick_search_json, status, disabled, created_by, updated_by)
             VALUES
                 (:id, :api_name, :label, :kind, :parent_object_id, :name_field_id,
-                 ${ns.jsonPlaceholder("quick_search_json")}, :status, :disabled, :created_by, :updated_by)
+                 ${jsonPh("quick_search_json")}, :status, :disabled, :created_by, :updated_by)
             """.trimIndent(),
             MapSqlParameterSource()
                 .addValue("id", o.id)
@@ -124,19 +137,19 @@ class MetadataRepository(
 
     fun findObjectByApi(api: String): MdObject? =
         queryOne(
-            "SELECT * FROM ${ns.table("md_object")} WHERE api_name = :api",
+            "SELECT * FROM ${table("md_object")} WHERE api_name = :api",
             mapOf("api" to api),
             objectMapper,
         )
 
     fun findObjectById(id: String): MdObject? =
         queryOne(
-            "SELECT * FROM ${ns.table("md_object")} WHERE id = :id",
+            "SELECT * FROM ${table("md_object")} WHERE id = :id",
             mapOf("id" to id),
             objectMapper,
         )
 
-    fun listObjects(): List<MdObject> = query("SELECT * FROM ${ns.table("md_object")} ORDER BY created_at", emptyMap(), objectMapper)
+    fun listObjects(): List<MdObject> = query("SELECT * FROM ${table("md_object")} ORDER BY created_at", emptyMap(), objectMapper)
 
     /** 对象核心列更新（api_name/kind/parent 不可变：变更＝删了重建，防图谱悬空）。 */
     fun updateObjectCore(
@@ -150,12 +163,12 @@ class MetadataRepository(
     ) {
         jdbc.update(
             """
-            UPDATE ${ns.table("md_object")}
+            UPDATE ${table("md_object")}
                SET label = COALESCE(:label, label),
                    status = COALESCE(:status, status),
                    disabled = COALESCE(:disabled, disabled),
                    name_field_id = COALESCE(:name_field_id, name_field_id),
-                   quick_search_json = COALESCE(${ns.jsonPlaceholder("quick_search_json")}, quick_search_json),
+                   quick_search_json = COALESCE(${jsonPh("quick_search_json")}, quick_search_json),
                    updated_by = :updated_by
              WHERE id = :id
             """.trimIndent(),
@@ -176,7 +189,7 @@ class MetadataRepository(
         updatedBy: String,
     ) {
         jdbc.update(
-            "UPDATE ${ns.table("md_object")} SET disabled = :disabled, updated_by = :updated_by WHERE id = :id",
+            "UPDATE ${table("md_object")} SET disabled = :disabled, updated_by = :updated_by WHERE id = :id",
             mapOf("disabled" to disabled, "updated_by" to updatedBy, "id" to id),
         )
     }
@@ -186,14 +199,14 @@ class MetadataRepository(
     fun insertField(f: MdField) {
         jdbc.update(
             """
-            INSERT INTO ${ns.table("md_field")}
+            INSERT INTO ${table("md_field")}
                 (id, object_id, api_name, label, logical_type, storage_kind, required,
                  default_json, validation_json, ui_json, ref_object_id, ref_any_objs_json,
                  dict_id, option_set_id, seq, enabled)
             VALUES
                 (:id, :object_id, :api_name, :label, :logical_type, :storage_kind, :required,
-                 ${ns.jsonPlaceholder("default_json")}, ${ns.jsonPlaceholder("validation_json")},
-                 ${ns.jsonPlaceholder("ui_json")}, :ref_object_id, ${ns.jsonPlaceholder("ref_any_objs_json")},
+                 ${jsonPh("default_json")}, ${jsonPh("validation_json")},
+                 ${jsonPh("ui_json")}, :ref_object_id, ${jsonPh("ref_any_objs_json")},
                  :dict_id, :option_set_id, :seq, :enabled)
             """.trimIndent(),
             MapSqlParameterSource()
@@ -218,26 +231,26 @@ class MetadataRepository(
 
     fun listFieldsByObjectId(objectId: String): List<MdField> =
         query(
-            "SELECT * FROM ${ns.table("md_field")} WHERE object_id = :oid ORDER BY seq, created_at",
+            "SELECT * FROM ${table("md_field")} WHERE object_id = :oid ORDER BY seq, created_at",
             mapOf("oid" to objectId),
             fieldMapper,
         )
 
-    fun listAllFields(): List<MdField> = query("SELECT * FROM ${ns.table("md_field")} ORDER BY object_id, seq", emptyMap(), fieldMapper)
+    fun listAllFields(): List<MdField> = query("SELECT * FROM ${table("md_field")} ORDER BY object_id, seq", emptyMap(), fieldMapper)
 
     fun findFieldByApi(
         objectId: String,
         api: String,
     ): MdField? =
         queryOne(
-            "SELECT * FROM ${ns.table("md_field")} WHERE object_id = :oid AND api_name = :api",
+            "SELECT * FROM ${table("md_field")} WHERE object_id = :oid AND api_name = :api",
             mapOf("oid" to objectId, "api" to api),
             fieldMapper,
         )
 
     fun findFieldById(id: String): MdField? =
         queryOne(
-            "SELECT * FROM ${ns.table("md_field")} WHERE id = :id",
+            "SELECT * FROM ${table("md_field")} WHERE id = :id",
             mapOf("id" to id),
             fieldMapper,
         )
@@ -255,12 +268,12 @@ class MetadataRepository(
     ) {
         jdbc.update(
             """
-            UPDATE ${ns.table("md_field")}
+            UPDATE ${table("md_field")}
                SET label = COALESCE(:label, label),
                    required = COALESCE(:required, required),
-                   default_json = COALESCE(${ns.jsonPlaceholder("default_json")}, default_json),
-                   validation_json = COALESCE(${ns.jsonPlaceholder("validation_json")}, validation_json),
-                   ui_json = COALESCE(${ns.jsonPlaceholder("ui_json")}, ui_json),
+                   default_json = COALESCE(${jsonPh("default_json")}, default_json),
+                   validation_json = COALESCE(${jsonPh("validation_json")}, validation_json),
+                   ui_json = COALESCE(${jsonPh("ui_json")}, ui_json),
                    seq = COALESCE(:seq, seq),
                    enabled = COALESCE(:enabled, enabled)
              WHERE id = :id
@@ -279,27 +292,27 @@ class MetadataRepository(
 
     // ---------- 字典 / 选项集（快照全量加载 + 图谱引用） ----------
 
-    fun listAllDicts(): List<MdDict> = query("SELECT id, name FROM ${ns.table("md_dict")} ORDER BY created_at", emptyMap(), dictMapper)
+    fun listAllDicts(): List<MdDict> = query("SELECT id, name FROM ${table("md_dict")} ORDER BY created_at", emptyMap(), dictMapper)
 
     fun listAllDictItems(): List<MdDictItem> =
         query(
-            "SELECT * FROM ${ns.table("md_dict_item")} ORDER BY dict_id, path, seq",
+            "SELECT * FROM ${table("md_dict_item")} ORDER BY dict_id, path, seq",
             emptyMap(),
             dictItemMapper,
         )
 
     fun listAllOptionSets(): List<MdOptionSet> =
         query(
-            "SELECT id, name, closed FROM ${ns.table("md_option_set")} ORDER BY created_at",
+            "SELECT id, name, closed FROM ${table("md_option_set")} ORDER BY created_at",
             emptyMap(),
             optionSetMapper,
         )
 
-    fun listAllOptions(): List<MdOption> = query("SELECT * FROM ${ns.table("md_option")} ORDER BY set_id, seq", emptyMap(), optionMapper)
+    fun listAllOptions(): List<MdOption> = query("SELECT * FROM ${table("md_option")} ORDER BY set_id, seq", emptyMap(), optionMapper)
 
     fun findDictById(id: String): MdDict? =
         queryOne(
-            "SELECT id, name FROM ${ns.table("md_dict")} WHERE id = :id",
+            "SELECT id, name FROM ${table("md_dict")} WHERE id = :id",
             mapOf("id" to id),
             dictMapper,
         )
@@ -309,7 +322,7 @@ class MetadataRepository(
             emptyList()
         } else {
             query(
-                "SELECT id, name FROM ${ns.table("md_dict")} WHERE id IN (:ids)",
+                "SELECT id, name FROM ${table("md_dict")} WHERE id IN (:ids)",
                 mapOf("ids" to ids),
                 dictMapper,
             )
@@ -320,7 +333,7 @@ class MetadataRepository(
             emptyList()
         } else {
             query(
-                "SELECT * FROM ${ns.table("md_dict_item")} WHERE dict_id IN (:ids) ORDER BY path, seq",
+                "SELECT * FROM ${table("md_dict_item")} WHERE dict_id IN (:ids) ORDER BY path, seq",
                 mapOf("ids" to ids),
                 dictItemMapper,
             )
@@ -328,7 +341,7 @@ class MetadataRepository(
 
     fun findOptionSetById(id: String): MdOptionSet? =
         queryOne(
-            "SELECT id, name, closed FROM ${ns.table("md_option_set")} WHERE id = :id",
+            "SELECT id, name, closed FROM ${table("md_option_set")} WHERE id = :id",
             mapOf("id" to id),
             optionSetMapper,
         )
@@ -338,7 +351,7 @@ class MetadataRepository(
             emptyList()
         } else {
             query(
-                "SELECT id, name, closed FROM ${ns.table("md_option_set")} WHERE id IN (:ids)",
+                "SELECT id, name, closed FROM ${table("md_option_set")} WHERE id IN (:ids)",
                 mapOf("ids" to ids),
                 optionSetMapper,
             )
@@ -349,7 +362,7 @@ class MetadataRepository(
             emptyList()
         } else {
             query(
-                "SELECT * FROM ${ns.table("md_option")} WHERE set_id IN (:ids) ORDER BY seq",
+                "SELECT * FROM ${table("md_option")} WHERE set_id IN (:ids) ORDER BY seq",
                 mapOf("ids" to ids),
                 optionMapper,
             )

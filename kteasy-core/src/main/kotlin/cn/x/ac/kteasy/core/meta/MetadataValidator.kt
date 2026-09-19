@@ -32,6 +32,15 @@ object MetadataValidator {
      */
     val DISPLAY_PLACEHOLDER: Regex = Regex("\\{([^{}]*)}")
 
+    /** 点链跳数上限（= EQL 图纸 03 `field-path` 的 `≤3 跳`，超出 EQL_TOO_DEEP）。 */
+    const val MAX_HOPS: Int = 3
+
+    /** 可作为级联首跳（能"点下去"到目标对象）的字段逻辑类型。 */
+    val REFERENCE_LOGICAL_TYPES: Set<LogicalType> = setOf(LogicalType.REF, LogicalType.ANYREF, LogicalType.N2N)
+
+    /** 引用型系统列：owner/created_by/updated_by 解析到 md_user、owner_dept 解析到 md_dept，可作级联首跳。 */
+    val REFERENCE_SYSTEM_COLUMNS: Set<String> = setOf("owner_user", "owner_dept", "created_by", "updated_by")
+
     /** 字典层级上限（⟨可逆⟩，图纸 01 §1）。 */
     const val DICT_MAX_DEPTH: Int = 4
 
@@ -104,16 +113,38 @@ object MetadataValidator {
         if (opens != closes) {
             v += "对象 [$apiName] 显示名称模板花括号不配平（{ $opens 个 / } $closes 个）"
         }
-        val enabledApiNames = fields.filter { it.enabled }.map { it.apiName }.toSet()
+        val enabledByName = fields.filter { it.enabled }.associateBy { it.apiName }
         DISPLAY_PLACEHOLDER.findAll(displayName).forEach { m ->
             val token = m.groupValues[1]
+            val hops = token.split('.')
+            val label = "对象 [$apiName] 显示名称模板占位符 {$token}"
             when {
-                token.isBlank() -> v += "对象 [$apiName] 显示名称模板含空占位符 {}"
-                checkApiName(token) != null -> v += "对象 [$apiName] 显示名称模板占位符 {$token} 非法（须为字段 api_name）"
-                token !in enabledApiNames -> v += "对象 [$apiName] 显示名称模板占位符 {$token} 未指向本对象存在的启用字段"
+                hops.any { it.isBlank() } -> v += "$label 含空路径段（. 分隔须各段非空）"
+                hops.size - 1 > MAX_HOPS -> v += "$label 级联超过 $MAX_HOPS 跳（EQL 点链上限）"
+                else -> v += checkDisplayPathHops(label, hops, enabledByName)
             }
         }
         return v
+    }
+
+    /** 单条点链跳级校验：只验首跳（对象内可判定）；深跳的跨对象存在性与取值交 M1-05 共享点链解析器。 */
+    private fun checkDisplayPathHops(
+        label: String,
+        hops: List<String>,
+        enabledByName: Map<String, MdField>,
+    ): List<String> {
+        val first = hops[0]
+        val firstField = enabledByName[first]
+        if (firstField == null && first !in SystemColumns.ALL) {
+            return listOf("$label 首跳 [$first] 非本对象启用字段或系统列")
+        }
+        if (hops.size > 1 &&
+            firstField?.logicalType !in REFERENCE_LOGICAL_TYPES &&
+            first !in REFERENCE_SYSTEM_COLUMNS
+        ) {
+            return listOf("$label 首跳 [$first] 不是引用/关联型，无法级联取值")
+        }
+        return emptyList()
     }
 
     /** 单字段校验（api_name/存储矩阵/引用完备性）；SYSTEM 型为引擎内部注入，治理面禁止直建。 */

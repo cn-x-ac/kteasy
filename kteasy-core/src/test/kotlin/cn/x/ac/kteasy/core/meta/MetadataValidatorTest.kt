@@ -157,18 +157,18 @@ class MetadataValidatorTest {
                 .checkObject(obj(displayName = ""), parentFields, null)
                 .any { it.contains("缺少显示名称模板") },
         )
-        // 占位符指向不存在字段
+        // 占位符首跳指向不存在字段/列
         assertTrue(
             MetadataValidator
                 .checkObject(obj(displayName = "{ghost}"), parentFields, null)
-                .any { it.contains("未指向本对象存在的启用字段") && it.contains("ghost") },
+                .any { it.contains("首跳 [ghost]") },
         )
         // 停用字段不可作片段
         val disabled = listOf(field("name", LogicalType.TEXT).copy(enabled = false), parentFields[1], parentFields[2])
         assertTrue(
             MetadataValidator
                 .checkObject(obj(displayName = "{name}"), disabled, null)
-                .any { it.contains("未指向本对象存在的启用字段") },
+                .any { it.contains("非本对象启用字段或系统列") },
         )
         // 花括号不配平
         assertTrue(
@@ -186,6 +186,38 @@ class MetadataValidatorTest {
         assertEquals(emptyList(), MetadataValidator.checkObject(obj(displayName = "{name}-{amount}"), parentFields, null))
         // 纯静态文本（无占位符）亦合法
         assertEquals(emptyList(), MetadataValidator.checkObject(obj(displayName = "客户"), parentFields, null))
+    }
+
+    @Test
+    fun `显示名称模板 - 级联点链`() {
+        // 经引用字段级联（首跳 cust=REF；深跳金额由 M1-05 点链解析，本卡不校验其存在性）
+        assertEquals(emptyList(), MetadataValidator.checkObject(obj(displayName = "{cust.amount}"), parentFields, null))
+        // 经引用型系统列级联：owner_dept → 目标对象字段（如部门负责人 {owner_dept.leader}）
+        assertEquals(emptyList(), MetadataValidator.checkObject(obj(displayName = "{owner_dept.leader}"), parentFields, null))
+        // 首跳是标量字段（name=TEXT）不可点下去
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{name.x}"), parentFields, null)
+                .any { it.contains("不是引用/关联型") },
+        )
+        // 超过 3 跳（cust.a.b.c.d = 4 跳）被拒
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{cust.a.b.c.d}"), parentFields, null)
+                .any { it.contains("级联超过 3 跳") },
+        )
+        // 空路径段
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{name..x}"), parentFields, null)
+                .any { it.contains("空路径段") },
+        )
+        // 未知首跳（既非字段亦非系统列）
+        assertTrue(
+            MetadataValidator
+                .checkObject(obj(displayName = "{ghost.x}"), parentFields, null)
+                .any { it.contains("首跳 [ghost]") },
+        )
     }
 
     @Test

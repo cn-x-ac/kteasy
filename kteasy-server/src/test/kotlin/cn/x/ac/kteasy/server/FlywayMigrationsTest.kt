@@ -58,7 +58,8 @@ class FlywayMigrationsTest {
     @Test
     fun `schema_change_job 列名一致且每列落在预期类型族`() {
         val pg = context.dialect == Dialect.POSTGRESQL
-        val table = if (pg) "schema_change_job" else "md_schema_change_job"
+        // V5 起两库表名统一为 md_schema_change_job（PG 落 md schema、MySQL 平铺），与 md_object 等同约定。
+        val table = "md_schema_change_job"
         val schema = if (pg) "md" else null
         // 每列允许的 java.sql.Types 值集合（方言相关，但用族而非字面量，容错驱动差异）。
         val intFam = setOf(Types.INTEGER, Types.BIGINT, Types.SMALLINT)

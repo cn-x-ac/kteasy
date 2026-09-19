@@ -195,6 +195,7 @@ class SchemaJobExecutor(
                 return true
             } catch (e: Exception) {
                 log.warn("步骤失败待重试 job={} kind={} seq={} 第{}次：{}", jobId, step.kind, step.seq, attempt, e.message)
+                runCatching { jobRepo.writeCheckpoint(jobId, "{\"error\":\"${e.message?.replace("\"", "'")?.take(400) ?: ""}\"}") }
                 jobRepo.markState(jobId, "FAILED")
                 if (attempt < MAX_RETRY) {
                     runCatching { Thread.sleep(BACKOFF_BASE_MS * (1L shl (attempt - 1))) }

@@ -50,7 +50,7 @@ class SchemaJobRepository(
     private val namespace = provider.namespace
     private val json = provider.json
 
-    private val table: String = namespace.qualified(LogicalArea.METADATA, "schema_change_job")
+    private val table: String = namespace.qualified(LogicalArea.METADATA, "md_schema_change_job")
 
     private val rowMapper =
         RowMapper { rs, _ ->
@@ -74,8 +74,16 @@ class SchemaJobRepository(
         val sql =
             "INSERT INTO $table (object_id, step_kind, seq, state, attempts) VALUES (:oid, :kind, :seq, 'PENDING', 0)"
         val keys = GeneratedKeyHolder()
-        jdbc.update(sql, MapSqlParameterSource().addValue("oid", objectId).addValue("kind", kind.name).addValue("seq", seq), keys)
-        return keys.key?.toLong() ?: error("schema_change_job 未返回自增 id")
+        jdbc.update(sql, MapSqlParameterSource().addValue("oid", objectId).addValue("kind", kind.name).addValue("seq", seq), keys, arrayOf("id"))
+        // 自增键：首选驱动回传；取不到时按 (object_id, seq) 最新行回查（PG/MySQL 驱动差异），绝不因此中断作业。
+        val id: Number? =
+            keys.key
+                ?: jdbc.queryForObject(
+                    "SELECT MAX(id) FROM $table WHERE object_id = :oid AND seq = :seq",
+                    mapOf("oid" to objectId, "seq" to seq),
+                    Number::class.java,
+                )
+        return id?.toLong() ?: error("schema_change_job 无法定位自增 id")
     }
 
     fun markState(

@@ -100,6 +100,28 @@ interface IndexOps {
         name: String,
         online: Boolean,
     ): List<DdlStatement>
+
+    /**
+     * 普通/唯一索引（真列加速，如 DICT 路径列的左前缀 btree）。
+     *
+     * PG `CREATE [UNIQUE] INDEX [CONCURRENTLY]`（在线时 `runOutsideTransaction=true`；注意 PG 唯一索引不支持
+     * CONCURRENTLY，[unique]=true 时实现须忽略 online）；MySQL `CREATE INDEX` 或建表内 UNIQUE。
+     * [table] 已由 [NamespaceMapper] 限定；[columns] 为普通列名清单（非表达式）。
+     */
+    fun createIndex(
+        table: String,
+        columns: List<String>,
+        name: String,
+        unique: Boolean,
+        online: Boolean,
+    ): List<DdlStatement>
+
+    /** 删索引（S7 档一热字段回退 / ADD_INDEX_EXPR 的逆步）。幂等由执行器 precheck 探存再发。 */
+    fun dropIndex(
+        table: String,
+        name: String,
+        online: Boolean,
+    ): DdlStatement
 }
 
 /** 列变更的方言封装（在线加列 / 生成列 / 删列）。 */
@@ -131,6 +153,61 @@ interface ColumnOps {
         table: String,
         name: String,
     ): DdlStatement
+}
+
+/**
+ * 表/约束级 DDL 的方言封装（步骤卡 M1-03 物化引擎消费）。只产出语句、绝不执行（红线④⑤）。
+ *
+ * `CREATE_TABLE` 与 `CREATE_RTABLE` 共用 [createTable]（差异仅在 [TableSpec.area]）。PG 侧动态表落 `app`
+ * schema，故实现须在首个建表前保证 `CREATE SCHEMA IF NOT EXISTS app`（幂等，MySQL 无此步）。
+ */
+interface TableOps {
+    /** 建表：返回**有序**语句序列（PG 首条可能为确保 schema 存在，随后单条 `CREATE TABLE`）。 */
+    fun createTable(spec: TableSpec): List<DdlStatement>
+
+    /** 删表（`DROP TABLE IF EXISTS`，幂等）。破坏性由执行器的引用检查把关。 */
+    fun dropTable(
+        area: LogicalArea,
+        name: String,
+    ): DdlStatement
+
+    /**
+     * 为已存在表补一条外键约束（`ADD_FK_COLUMN` 步的 FK 半程，与 [ColumnOps.addNullableColumn] 组合）。
+     * 单条即成（MySQL 加 FK 只能 INPLACE，无 INSTANT 档）。
+     */
+    fun addForeignKey(spec: ForeignKeySpec): DdlStatement
+}
+
+/**
+ * 结构存在性探测（幂等 precheck/postcheck 的方言出口，M1-03 执行器据此判断「这步是否已生效」）。
+ *
+ * 一律返回 `SELECT COUNT(*) ...` 形态的 [Fragment]（具名占位符绑定表/列/索引/约束名），执行器按
+ * `count > 0` 判存在——两库经 `information_schema`（PG 索引用 `pg_indexes`）各自成型，探测 SQL 的方言
+ * 差异被圈在这里，执行器侧无 `if (isMySQL)`（红线⑤）。
+ */
+interface IntrospectionOps {
+    fun tableExists(
+        area: LogicalArea,
+        name: String,
+    ): Fragment
+
+    fun columnExists(
+        area: LogicalArea,
+        table: String,
+        column: String,
+    ): Fragment
+
+    fun indexExists(
+        area: LogicalArea,
+        table: String,
+        index: String,
+    ): Fragment
+
+    fun foreignKeyExists(
+        area: LogicalArea,
+        table: String,
+        constraint: String,
+    ): Fragment
 }
 
 /** upsert 子句的方言封装。 */
@@ -205,6 +282,8 @@ interface SchemaProvider {
     val json: JsonOps
     val index: IndexOps
     val column: ColumnOps
+    val table: TableOps
+    val introspection: IntrospectionOps
     val upsert: UpsertFragment
     val lock: LockOps
     val lockingRead: LockingReadOps

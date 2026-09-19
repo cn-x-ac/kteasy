@@ -31,6 +31,10 @@ class PostgresSchemaProvider : SchemaProvider {
 
     override val column: ColumnOps = PgColumnOps
 
+    override val table: TableOps = PgTableOps
+
+    override val introspection: IntrospectionOps = PgIntrospection
+
     override val upsert: UpsertFragment = PgUpsert
 
     override val lock: LockOps = PgLock
@@ -145,7 +149,140 @@ private object PgIndexOps : IndexOps {
         val stmt = "CREATE INDEX $concurrently$name ON $table USING gin ($column jsonb_path_ops)"
         return listOf(DdlStatement(stmt, runOutsideTransaction = online))
     }
+
+    override fun createIndex(
+        table: String,
+        columns: List<String>,
+        name: String,
+        unique: Boolean,
+        online: Boolean,
+    ): List<DdlStatement> {
+        // PG 唯一索引不支持 CONCURRENTLY；在线仅在非唯一时生效。
+        val concurrent = online && !unique
+        val head = if (unique) "CREATE UNIQUE INDEX" else "CREATE INDEX"
+        val stmt = "$head${if (concurrent) " CONCURRENTLY" else ""} $name ON $table (${columns.joinToString(", ")})"
+        return listOf(DdlStatement(stmt, runOutsideTransaction = concurrent))
+    }
+
+    override fun dropIndex(
+        table: String,
+        name: String,
+        online: Boolean,
+    ): DdlStatement {
+        // PG 索引按 schema 内的名字删（非按表）；从已限定表名 `app.x` 取 schema 前缀拼出 `app.name`。
+        val qualified = "${table.substringBefore('.')}.$name"
+        val head = if (online) "DROP INDEX CONCURRENTLY" else "DROP INDEX"
+        return DdlStatement("$head IF EXISTS $qualified", runOutsideTransaction = online)
+    }
 }
+
+private object PgTableOps : TableOps {
+    override fun createTable(spec: TableSpec): List<DdlStatement> {
+        val out = mutableListOf<DdlStatement>()
+        // 动态表落独立 schema（app/md/...）：先幂等确保其存在，MySQL 无此步。
+        spec.area.pgSchema?.let { out += DdlStatement("CREATE SCHEMA IF NOT EXISTS $it") }
+        val host = pgQualify(spec.area, spec.name)
+        val parts = mutableListOf<String>()
+        parts += spec.columns.map { it.toPgColumnDef() }
+        spec.columns.filter { it.primaryKey }.takeIf { it.isNotEmpty() }?.let { pk ->
+            parts += "PRIMARY KEY (${pk.joinToString(", ") { it.name }})"
+        }
+        spec.foreignKeys.forEach { parts += "CONSTRAINT ${it.name} ${pgFkClause(it)}" }
+        spec.uniques.forEach { parts += "CONSTRAINT ${it.name} UNIQUE (${it.columns.joinToString(", ")})" }
+        out += DdlStatement("CREATE TABLE $host (${parts.joinToString(", ")})")
+        spec.indexes.forEach { idx ->
+            out += DdlStatement("CREATE ${if (idx.unique) "UNIQUE " else ""}INDEX ${idx.name} ON $host (${idx.columns.joinToString(", ")})")
+        }
+        return out
+    }
+
+    override fun dropTable(
+        area: LogicalArea,
+        name: String,
+    ): DdlStatement = DdlStatement("DROP TABLE IF EXISTS ${pgQualify(area, name)}")
+
+    override fun addForeignKey(spec: ForeignKeySpec): DdlStatement = DdlStatement("ALTER TABLE ${pgQualify(spec.hostArea, spec.hostTable)} ADD CONSTRAINT ${spec.name} ${pgFkClause(spec)}")
+
+    /** 逻辑区 + 逻辑名 → PG 限定名（与 [PgNamespace] 同规则，独立于此扩展点内的私有对象）。 */
+    private fun pgQualify(
+        area: LogicalArea,
+        name: String,
+    ): String = "${requireNotNull(area.pgSchema) { "PG 建表须有 schema" }}.${area.pgPrefix}$name"
+
+    /** 外键子句体：`FOREIGN KEY (col) REFERENCES <限定宿主> (refcol)`。 */
+    private fun pgFkClause(spec: ForeignKeySpec): String = "FOREIGN KEY (${spec.column}) REFERENCES ${pgQualify(spec.refArea, spec.refTable)} (${spec.refColumn})"
+}
+
+private object PgIntrospection : IntrospectionOps {
+    override fun tableExists(
+        area: LogicalArea,
+        name: String,
+    ): Fragment =
+        Fragment(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = :$S AND table_name = :$T",
+            mapOf(S to area.pgSchema, T to area.pgPrefix + name),
+        )
+
+    override fun columnExists(
+        area: LogicalArea,
+        table: String,
+        column: String,
+    ): Fragment =
+        Fragment(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = :$S AND table_name = :$T AND column_name = :$C",
+            mapOf(S to area.pgSchema, T to area.pgPrefix + table, C to column),
+        )
+
+    override fun indexExists(
+        area: LogicalArea,
+        table: String,
+        index: String,
+    ): Fragment =
+        Fragment(
+            "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = :$S AND tablename = :$T AND indexname = :$I",
+            mapOf(S to area.pgSchema, T to area.pgPrefix + table, I to index),
+        )
+
+    override fun foreignKeyExists(
+        area: LogicalArea,
+        table: String,
+        constraint: String,
+    ): Fragment =
+        Fragment(
+            "SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema = :$S AND table_name = :$T AND constraint_name = :$I AND constraint_type = 'FOREIGN KEY'",
+            mapOf(S to area.pgSchema, T to area.pgPrefix + table, I to constraint),
+        )
+
+    private const val S = "__kteasy_s"
+    private const val T = "__kteasy_t"
+    private const val C = "__kteasy_c"
+    private const val I = "__kteasy_i"
+}
+
+/** PG 单列定义（含 NOT NULL / DEFAULT）；主键不在此内联，改由表级 `PRIMARY KEY` 约束。 */
+private fun PhysicalColumn.toPgColumnDef(): String {
+    val sb = StringBuilder("$name ${type.toPgType(length)}")
+    if (!nullable && !primaryKey) sb.append(" NOT NULL")
+    when (val d = default) {
+        null -> Unit
+        ColumnDefault.Now -> sb.append(" DEFAULT now()")
+        ColumnDefault.Zero -> sb.append(" DEFAULT 0")
+        is ColumnDefault.Literal -> sb.append(" DEFAULT ${sqlLiteral(d.text)}")
+    }
+    return sb.toString()
+}
+
+/** 由 [ColumnType]（可含 [length]）渲染 PG 列类型。 */
+private fun ColumnType.toPgType(length: Int?): String =
+    when (this) {
+        ColumnType.VARCHAR -> "varchar(${requireNotNull(length) { "VARCHAR 须带 length" }})"
+        ColumnType.TEXT -> "text"
+        ColumnType.BIGINT -> "bigint"
+        ColumnType.INTEGER -> "integer"
+        ColumnType.BOOLEAN -> "boolean"
+        ColumnType.TIMESTAMP -> "timestamptz"
+        ColumnType.JSON -> "jsonb"
+    }
 
 private object PgColumnOps : ColumnOps {
     override fun addNullableColumn(

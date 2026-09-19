@@ -176,4 +176,144 @@ class DialectSqlTest {
         assertThat(my.ddlTx.stepCheckpointRequired()).isTrue() // MySQL 需作业断点（M1-03 地基）
         assertThat(pg.ddlTx.stepCheckpointRequired()).isFalse()
     }
+
+    // ---------- TableOps（M1-03 建表/删表/外键） ----------
+
+    private val idCol = PhysicalColumn("id", ColumnType.VARCHAR, 32, nullable = false, primaryKey = true)
+
+    private val extCol = PhysicalColumn("ext", ColumnType.JSON)
+
+    @Test
+    fun `建对象表 PG 先确保 app schema 存在 MySQL 单表带引擎子句`() {
+        val spec = TableSpec(LogicalArea.ENTITY, "customer", listOf(idCol, extCol))
+        val pgStmts = pg.table.createTable(spec)
+        assertThat(pgStmts.first().sql).isEqualTo("CREATE SCHEMA IF NOT EXISTS app")
+        assertThat(pgStmts[1].sql)
+            .contains("CREATE TABLE app.customer (")
+            .contains("id varchar(32)")
+            .contains("ext jsonb")
+            .contains("PRIMARY KEY (id)")
+        // MySQL 无 schema：单条建表，前缀 e_，带 InnoDB/utf8mb4。
+        val myStmts = my.table.createTable(spec)
+        assertThat(myStmts).hasSize(1)
+        assertThat(myStmts.single().sql)
+            .doesNotContain("CREATE SCHEMA")
+            .contains("CREATE TABLE e_customer (")
+            .contains("id varchar(32)")
+            .contains("ext json")
+            .endsWith(") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4")
+    }
+
+    @Test
+    fun `建 N2N 关联表 双方 FK 与唯一对经命名空间分叉`() {
+        val spec =
+            TableSpec(
+                area = LogicalArea.RELATION,
+                name = "cust_orders",
+                columns = listOf(idCol, PhysicalColumn("cust_id", ColumnType.VARCHAR, 32), PhysicalColumn("order_id", ColumnType.VARCHAR, 32)),
+                foreignKeys =
+                    listOf(
+                        ForeignKeySpec("fk_rel_cust", LogicalArea.RELATION, "cust_orders", "cust_id", LogicalArea.ENTITY, "customer"),
+                        ForeignKeySpec("fk_rel_order", LogicalArea.RELATION, "cust_orders", "order_id", LogicalArea.ENTITY, "orders"),
+                    ),
+                uniques = listOf(UniqueSpec("uk_rel_pair", listOf("cust_id", "order_id"))),
+            )
+        val pgSql =
+            pg.table
+                .createTable(spec)
+                .last()
+                .sql
+        assertThat(pgSql)
+            .contains("app.r_cust_orders")
+            .contains("REFERENCES app.customer (id)")
+            .contains("REFERENCES app.orders (id)")
+            .contains("UNIQUE (cust_id, order_id)")
+        val mySql =
+            my.table
+                .createTable(spec)
+                .single()
+                .sql
+        assertThat(mySql)
+            .contains("r_cust_orders")
+            .contains("REFERENCES e_customer (id)")
+            .contains("REFERENCES e_orders (id)")
+            .contains("UNIQUE INDEX uk_rel_pair")
+    }
+
+    @Test
+    fun `删表与补外键 各自限定名`() {
+        assertThat(pg.table.dropTable(LogicalArea.ENTITY, "customer").sql).isEqualTo("DROP TABLE IF EXISTS app.customer")
+        assertThat(my.table.dropTable(LogicalArea.ENTITY, "customer").sql).isEqualTo("DROP TABLE IF EXISTS e_customer")
+        val fk = ForeignKeySpec("fk_emp_dept", LogicalArea.ENTITY, "employee", "dept_id", LogicalArea.ENTITY, "department")
+        assertThat(pg.table.addForeignKey(fk).sql).isEqualTo("ALTER TABLE app.employee ADD CONSTRAINT fk_emp_dept FOREIGN KEY (dept_id) REFERENCES app.department (id)")
+        assertThat(my.table.addForeignKey(fk).sql).isEqualTo("ALTER TABLE e_employee ADD CONSTRAINT fk_emp_dept FOREIGN KEY (dept_id) REFERENCES e_department (id)")
+    }
+
+    @Test
+    fun `默认值与列类型 双库各按自身语法`() {
+        val spec =
+            TableSpec(
+                LogicalArea.ENTITY,
+                "order",
+                listOf(
+                    idCol,
+                    PhysicalColumn("created_at", ColumnType.TIMESTAMP, nullable = false, default = ColumnDefault.Now),
+                    PhysicalColumn("row_version", ColumnType.BIGINT, nullable = false, default = ColumnDefault.Zero),
+                    PhysicalColumn("approval_state", ColumnType.VARCHAR, 16, nullable = false, default = ColumnDefault.Literal("DRAFT")),
+                ),
+            )
+        val pgSql =
+            pg.table
+                .createTable(spec)
+                .last()
+                .sql
+        assertThat(pgSql).contains("created_at timestamptz NOT NULL DEFAULT now()").contains("row_version bigint NOT NULL DEFAULT 0").contains("approval_state varchar(16) NOT NULL DEFAULT 'DRAFT'")
+        val mySql =
+            my.table
+                .createTable(spec)
+                .single()
+                .sql
+        assertThat(mySql).contains("created_at datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)").contains("row_version bigint NOT NULL DEFAULT 0").contains("approval_state varchar(16) NOT NULL DEFAULT 'DRAFT'")
+    }
+
+    // ---------- IndexOps 普通/删索引（M1-03 追加能力） ----------
+
+    @Test
+    fun `普通索引在线 PG 走 CONCURRENTLY 事务外 唯一索引则忽略在线`() {
+        val online = pg.index.createIndex("app.customer", listOf("amount"), "ix_amt", unique = false, online = true)
+        assertThat(online.single().sql).isEqualTo("CREATE INDEX CONCURRENTLY ix_amt ON app.customer (amount)")
+        assertThat(online.single().runOutsideTransaction).isTrue()
+        val uniq = pg.index.createIndex("app.customer", listOf("code"), "ux_code", unique = true, online = true)
+        assertThat(uniq.single().sql).isEqualTo("CREATE UNIQUE INDEX ux_code ON app.customer (code)").doesNotContain("CONCURRENTLY")
+        assertThat(uniq.single().runOutsideTransaction).isFalse()
+        // MySQL 用 ALTER ADD INDEX + INPLACE,LOCK=NONE，无事务外标志。
+        val myOnline = my.index.createIndex("e_customer", listOf("amount"), "ix_amt", unique = false, online = true)
+        assertThat(myOnline.single().sql).isEqualTo("ALTER TABLE e_customer ADD INDEX ix_amt (amount), ALGORITHM=INPLACE, LOCK=NONE")
+        assertThat(myOnline.single().runOutsideTransaction).isFalse()
+    }
+
+    @Test
+    fun `删索引 PG 按 schema 限定名 MySQL 按表 ADD 或 DROP`() {
+        assertThat(pg.index.dropIndex("app.customer", "ix_amt", online = true).sql).isEqualTo("DROP INDEX CONCURRENTLY IF EXISTS app.ix_amt")
+        assertThat(my.index.dropIndex("e_customer", "ix_amt", online = false).sql).isEqualTo("ALTER TABLE e_customer DROP INDEX ix_amt")
+    }
+
+    // ---------- IntrospectionOps（precheck 探测：count>0 判存在） ----------
+
+    @Test
+    fun `存在性探测 PG 用 schema 参数 MySQL 用 DATABASE 函数`() {
+        val pgTable = pg.introspection.tableExists(LogicalArea.ENTITY, "customer")
+        assertThat(pgTable.sql).contains("information_schema.tables").doesNotContain("DATABASE()")
+        assertThat(pgTable.params).containsEntry("__kteasy_s", "app").containsEntry("__kteasy_t", "customer")
+        val myTable = my.introspection.tableExists(LogicalArea.ENTITY, "customer")
+        assertThat(myTable.sql).contains("DATABASE()")
+        assertThat(myTable.params).containsEntry("__kteasy_t", "e_customer")
+
+        // PG 索引在 pg_indexes；MySQL 在 information_schema.statistics。
+        assertThat(pg.introspection.indexExists(LogicalArea.ENTITY, "customer", "ix").sql).contains("pg_indexes")
+        assertThat(my.introspection.indexExists(LogicalArea.ENTITY, "customer", "ix").sql).contains("information_schema.statistics")
+        // 外键两侧都查 table_constraints，但 schema 定位方式不同。
+        assertThat(pg.introspection.foreignKeyExists(LogicalArea.ENTITY, "customer", "fk").sql).contains("constraint_schema = :__kteasy_s")
+        assertThat(my.introspection.foreignKeyExists(LogicalArea.ENTITY, "customer", "fk").sql).contains("table_schema = DATABASE()")
+    }
 }

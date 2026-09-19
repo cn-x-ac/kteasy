@@ -33,6 +33,10 @@ class MySqlSchemaProvider : SchemaProvider {
 
     override val column: ColumnOps = MyColumnOps
 
+    override val table: TableOps = MyTableOps
+
+    override val introspection: IntrospectionOps = MyIntrospection
+
     override val upsert: UpsertFragment = MyUpsert
 
     override val lock: LockOps = MyLock
@@ -136,6 +140,27 @@ private object MyIndexOps : IndexOps {
         val expr = "CAST($column -> '${path.toMySqlJsonPath()}' AS CHAR($MY_MULTI_VAL_LEN) ARRAY)"
         return listOf(DdlStatement("ALTER TABLE $table ADD INDEX $name (($expr))$tail"))
     }
+
+    override fun createIndex(
+        table: String,
+        columns: List<String>,
+        name: String,
+        unique: Boolean,
+        online: Boolean,
+    ): List<DdlStatement> {
+        val kind = if (unique) "UNIQUE INDEX" else "INDEX"
+        val tail = if (online) ", ALGORITHM=INPLACE, LOCK=NONE" else ""
+        return listOf(DdlStatement("ALTER TABLE $table ADD $kind $name (${columns.joinToString(", ")})$tail"))
+    }
+
+    override fun dropIndex(
+        table: String,
+        name: String,
+        online: Boolean,
+    ): DdlStatement {
+        val tail = if (online) ", ALGORITHM=INPLACE, LOCK=NONE" else ""
+        return DdlStatement("ALTER TABLE $table DROP INDEX $name$tail")
+    }
 }
 
 private object MyColumnOps : ColumnOps {
@@ -174,6 +199,101 @@ private object MyColumnOps : ColumnOps {
         name: String,
     ): DdlStatement = DdlStatement("ALTER TABLE $table DROP COLUMN $name")
 }
+
+private object MyTableOps : TableOps {
+    override fun createTable(spec: TableSpec): List<DdlStatement> {
+        val host = spec.area.mysqlPrefix + spec.name
+        val parts = mutableListOf<String>()
+        parts += spec.columns.map { it.toMySqlColumnDef() }
+        spec.columns.filter { it.primaryKey }.takeIf { it.isNotEmpty() }?.let { pk ->
+            parts += "PRIMARY KEY (${pk.joinToString(", ") { it.name }})"
+        }
+        spec.uniques.forEach { parts += "UNIQUE INDEX ${it.name} (${it.columns.joinToString(", ")})" }
+        spec.indexes.forEach { parts += "${if (it.unique) "UNIQUE " else ""}INDEX ${it.name} (${it.columns.joinToString(", ")})" }
+        spec.foreignKeys.forEach { parts += "CONSTRAINT ${it.name} ${myFkClause(it)}" }
+        val stmt = "CREATE TABLE $host (${parts.joinToString(", ")}) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4"
+        return listOf(DdlStatement(stmt))
+    }
+
+    override fun dropTable(
+        area: LogicalArea,
+        name: String,
+    ): DdlStatement = DdlStatement("DROP TABLE IF EXISTS ${area.mysqlPrefix}$name")
+
+    override fun addForeignKey(spec: ForeignKeySpec): DdlStatement = DdlStatement("ALTER TABLE ${spec.hostArea.mysqlPrefix}${spec.hostTable} ADD CONSTRAINT ${spec.name} ${myFkClause(spec)}")
+
+    private fun myFkClause(spec: ForeignKeySpec): String = "FOREIGN KEY (${spec.column}) REFERENCES ${spec.refArea.mysqlPrefix}${spec.refTable} (${spec.refColumn})"
+}
+
+private object MyIntrospection : IntrospectionOps {
+    override fun tableExists(
+        area: LogicalArea,
+        name: String,
+    ): Fragment =
+        Fragment(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :$T",
+            mapOf(T to area.mysqlPrefix + name),
+        )
+
+    override fun columnExists(
+        area: LogicalArea,
+        table: String,
+        column: String,
+    ): Fragment =
+        Fragment(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = :$T AND column_name = :$C",
+            mapOf(T to area.mysqlPrefix + table, C to column),
+        )
+
+    override fun indexExists(
+        area: LogicalArea,
+        table: String,
+        index: String,
+    ): Fragment =
+        Fragment(
+            "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = :$T AND index_name = :$I",
+            mapOf(T to area.mysqlPrefix + table, I to index),
+        )
+
+    override fun foreignKeyExists(
+        area: LogicalArea,
+        table: String,
+        constraint: String,
+    ): Fragment =
+        Fragment(
+            "SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema = DATABASE() AND table_name = :$T AND constraint_name = :$I AND constraint_type = 'FOREIGN KEY'",
+            mapOf(T to area.mysqlPrefix + table, I to constraint),
+        )
+
+    private const val T = "__kteasy_t"
+    private const val C = "__kteasy_c"
+    private const val I = "__kteasy_i"
+}
+
+/** MySQL 单列定义（含 NOT NULL / DEFAULT）；主键改由表级 `PRIMARY KEY` 约束。 */
+private fun PhysicalColumn.toMySqlColumnDef(): String {
+    val sb = StringBuilder("$name ${type.toMySqlType(length)}")
+    if (!nullable && !primaryKey) sb.append(" NOT NULL")
+    when (val d = default) {
+        null -> Unit
+        ColumnDefault.Now -> sb.append(" DEFAULT CURRENT_TIMESTAMP(6)")
+        ColumnDefault.Zero -> sb.append(" DEFAULT 0")
+        is ColumnDefault.Literal -> sb.append(" DEFAULT ${sqlLiteral(d.text)}")
+    }
+    return sb.toString()
+}
+
+/** 由 [ColumnType]（可含 [length]）渲染 MySQL 列类型。 */
+private fun ColumnType.toMySqlType(length: Int?): String =
+    when (this) {
+        ColumnType.VARCHAR -> "varchar(${requireNotNull(length) { "VARCHAR 须带 length" }})"
+        ColumnType.TEXT -> "longtext"
+        ColumnType.BIGINT -> "bigint"
+        ColumnType.INTEGER -> "int"
+        ColumnType.BOOLEAN -> "boolean"
+        ColumnType.TIMESTAMP -> "datetime(6)"
+        ColumnType.JSON -> "json"
+    }
 
 private object MyUpsert : UpsertFragment {
     override fun supportsReturning(): Boolean = false

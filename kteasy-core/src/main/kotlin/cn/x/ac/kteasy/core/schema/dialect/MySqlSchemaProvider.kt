@@ -277,6 +277,14 @@ private object MyIntrospection : IntrospectionOps {
             mapOf(T to area.mysqlPrefix + table, I to constraint),
         )
 
+    override fun listColumns(
+        area: LogicalArea,
+        table: String,
+    ): Fragment = Fragment(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = :$T ORDER BY ordinal_position",
+        mapOf(T to area.mysqlPrefix + table),
+    )
+
     private const val T = "__kteasy_t"
     private const val C = "__kteasy_c"
     private const val I = "__kteasy_i"

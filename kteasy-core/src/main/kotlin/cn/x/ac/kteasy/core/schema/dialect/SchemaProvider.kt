@@ -220,6 +220,16 @@ interface IntrospectionOps {
         table: String,
         constraint: String,
     ): Fragment
+
+    /**
+     * 列出某表当前全部物理列名（diff 取「已物化列集合」用，免去逐列探测）。
+     *
+     * 返回单列结果集（列名 `column_name`）的 `SELECT` [Fragment]；[table] 传逻辑表名，实现按 [area] 现算限定。
+     */
+    fun listColumns(
+        area: LogicalArea,
+        table: String,
+    ): Fragment
 }
 
 /** upsert 子句的方言封装。 */

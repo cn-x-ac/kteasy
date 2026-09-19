@@ -258,6 +258,14 @@ private object PgIntrospection : IntrospectionOps {
             mapOf(S to area.pgSchema, T to area.pgPrefix + table, I to constraint),
         )
 
+    override fun listColumns(
+        area: LogicalArea,
+        table: String,
+    ): Fragment = Fragment(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = :$S AND table_name = :$T ORDER BY ordinal_position",
+        mapOf(S to area.pgSchema, T to area.pgPrefix + table),
+    )
+
     private const val S = "__kteasy_s"
     private const val T = "__kteasy_t"
     private const val C = "__kteasy_c"

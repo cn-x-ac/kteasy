@@ -56,3 +56,22 @@ springBoot {
 
 tasks.matching { it.name == "bootJar" }.configureEach { enabled = true }
 tasks.matching { it.name == "jar" }.configureEach { enabled = false }
+
+// Block F：dev/seed 造数脚本作为 test 附加源参与编译（性能集成测直接调用；dev 工具、不进 bootJar 产物）。
+kotlin {
+    sourceSets.named("test") {
+        kotlin.srcDir(rootProject.file("dev/seed"))
+    }
+}
+
+// 独立造数入口：./gradlew :kteasy-server:seed50w -PseedTable=<物理限定名> -PseedRows=500000
+tasks.register<JavaExec>("seed50w") {
+    group = "kteasy"
+    description = "向指定实体表集合式灌 N 行造数（Block F 性能证据用）"
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("cn.x.ac.kteasy.dev.seed.SeedRunner")
+    args = listOfNotNull(
+        providers.gradleProperty("seedTable").orNull,
+        providers.gradleProperty("seedRows").orNull,
+    )
+}

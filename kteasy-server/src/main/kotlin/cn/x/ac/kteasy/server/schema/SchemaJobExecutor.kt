@@ -71,6 +71,13 @@ class SchemaJobExecutor(
     private var running = false
     private var worker: Thread? = null
 
+    /**
+     * 仅测试注入的故障钩子（生产恒 null，单次可空调用零副作用）：给定步型返回要抛出的异常即令该步失败，
+     * 用于确定性验证「重试至多 3 次→挂起→（清除故障后）手工续跑至 DONE」（卡面 GWT，无更干净的注入途径）。
+     */
+    @Volatile
+    internal var faultForTest: ((cn.x.ac.kteasy.core.schema.StepKind) -> Throwable?)? = null
+
     @PostConstruct
     fun start() {
         running = true
@@ -233,6 +240,7 @@ class SchemaJobExecutor(
             jobRepo.markState(jobId, "RUNNING")
             val t0 = System.nanoTime()
             try {
+                faultForTest?.invoke(step.kind)?.let { throw it }
                 doStep(template, step, jobId)
                 if (!postcheck(template, step)) {
                     throw IllegalStateException("postcheck 未确认：kind=${step.kind} seq=${step.seq}")

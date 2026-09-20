@@ -25,19 +25,20 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource
  * 属 dev 工具：按方言各写各的批量 SQL，不受引擎「无 if(isMySQL)」红线约束（红线④⑤只圈 src/main 运行期路径）。
  */
 object SeedRunner {
-    /** 向实体表 [physicalTable]（已限定名）集合式灌入 [rows] 行，`ext` 携 {"v": <0..996>}。返回耗时 ms。 */
+    /** 向实体表 [physicalTable]（已限定名）集合式灌入 [rows] 行，`ext` 携 {jsonKey: <0..996>}。返回耗时 ms。 */
     fun seed(
         jdbc: NamedParameterJdbcTemplate,
         physicalTable: String,
         dialect: String,
         rows: Int,
+        jsonKey: String = "v",
     ): Long {
         val t0 = System.currentTimeMillis()
         if (dialect == "pg") {
             jdbc.update(
                 """
                 INSERT INTO $physicalTable (id, ext)
-                SELECT 'seed' || lpad(g::text, 12, '0'), jsonb_build_object('v', (g % 997))
+                SELECT 'seed' || lpad(g::text, 12, '0'), jsonb_build_object('$jsonKey', (g % 997))
                   FROM generate_series(1, :n) AS g
                 """.trimIndent(),
                 mapOf("n" to rows),
@@ -50,7 +51,7 @@ object SeedRunner {
                 WITH RECURSIVE seq(n) AS (
                     SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < :n
                 )
-                SELECT CONCAT('seed', LPAD(n, 12, '0')), JSON_OBJECT('v', MOD(n, 997)) FROM seq
+                SELECT CONCAT('seed', LPAD(n, 12, '0')), JSON_OBJECT('$jsonKey', MOD(n, 997)) FROM seq
                 """.trimIndent(),
                 mapOf("n" to rows),
             )

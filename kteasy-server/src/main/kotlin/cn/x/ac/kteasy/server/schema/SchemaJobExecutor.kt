@@ -78,6 +78,10 @@ class SchemaJobExecutor(
     @Volatile
     internal var faultForTest: ((cn.x.ac.kteasy.core.schema.StepKind) -> Throwable?)? = null
 
+    /** 仅测试用：回填累计到该批数后抛错（模拟进程在途死亡，last_id 已落 checkpoint），默认不触发。 */
+    @Volatile
+    internal var haltBackfillAfterForTest: Int = Int.MAX_VALUE
+
     @PostConstruct
     fun start() {
         running = true
@@ -376,6 +380,7 @@ class SchemaJobExecutor(
         val exists = provider.json.predicateExists("ext", keyPath).sql
         val extract = provider.json.extractTyped("ext", keyPath, op.cast).sql
         var lastId = readLastIdStr(jobId)
+        var batches = 0
         while (true) {
             val ids = queryIdsAfter(template, host, "$exists AND id > :lastId", lastId, op.batchSize)
             if (ids.isEmpty()) break
@@ -385,6 +390,9 @@ class SchemaJobExecutor(
             )
             lastId = ids.last()
             mergeCheckpointField(jobId, "lastId", lastId)
+            if (++batches >= haltBackfillAfterForTest) {
+                throw IllegalStateException("模拟 kill -9：回填 $batches 批后中断（last_id=$lastId 已落 checkpoint）")
+            }
         }
     }
 

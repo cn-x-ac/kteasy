@@ -105,7 +105,7 @@ jobs:
         with:
           cache-read-only: false
 
-      - name: 双库启动 smoke + 元数据/方言 SPI 矩阵（Flyway V1–V4 · 列类型映射 · JDBC 探活 · md 治理面 · M1-02 双库等价/EXPLAIN）
+      - name: 双库启动 smoke + 元数据/方言 SPI 矩阵 + M1-03 物化引擎（Flyway V1–V4 · 列类型映射 · JDBC 探活 · md 治理面 · M1-02 双库等价/EXPLAIN · M1-03 物化/物理化四步断点续跑）
         run: |
           ./gradlew --no-daemon :kteasy-server:test \
             --tests "cn.x.ac.kteasy.server.FlywayMigrationsTest" \
@@ -113,4 +113,9 @@ jobs:
             --tests "cn.x.ac.kteasy.server.md.MetadataSchemaTest" \
             --tests "cn.x.ac.kteasy.server.md.MetadataGovernanceApiTest" \
             --tests "cn.x.ac.kteasy.server.md.MetadataCacheConcurrencyTest" \
-            --tests "cn.x.ac.kteasy.server.dialect.SchemaProviderMatrixTest"
+            --tests "cn.x.ac.kteasy.server.dialect.SchemaProviderMatrixTest" \
+            --tests "cn.x.ac.kteasy.server.schema.MaterializationIT" \
+            --tests "cn.x.ac.kteasy.server.schema.PhysicalizationIT" \
+            --tests "cn.x.ac.kteasy.server.schema.SchemaJobApiIT" \
+            --tests "cn.x.ac.kteasy.server.schema.StepFailureResumeIT" \
+            --tests "cn.x.ac.kteasy.server.schema.KillResumeIT"

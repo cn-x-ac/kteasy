@@ -49,7 +49,7 @@ import javax.sql.DataSource
  * 重新入队）→ 从 last_id 续跑到终态。断言全量行迁移、ext 键清零、无重复、值正确。双库真连。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@EnabledIfEnvironmentVariable(named = "KTEASY_PERF", matches = "true")
+@EnabledIfEnvironmentVariable(named = "KTEASY_IT_DB", matches = "true")
 class KillResumeIT {
     @Autowired
     lateinit var meta: MetadataService

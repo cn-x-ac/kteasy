@@ -29,6 +29,10 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         mavenCentral()
+        // 仅用于 M1-04 拼音检索码：正牌 TinyPinyin（com.github.promeg:TinyPinyin，Apache-2.0、自带拼音表、
+        // 不依赖 pinyin4j）。Maven Central 上的同类拼音库要么本身 LGPL/GPLv3、要么传递引入 pinyin4j(LGPL)，
+        // 皆违反本仓 NOTICE「仅宽松许可」承诺；正牌件只在 JitPack，故此刻意引一个第三方仓（按需构建）。
+        maven { url = uri("https://jitpack.io") }
     }
 }
 

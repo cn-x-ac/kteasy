@@ -14,6 +14,8 @@ spotless = "8.10.2"
 ktlint = "1.8.0"
 # 架构门禁（M1-02 红线④⑤）：把「方言只在 core.schema.dialect、业务层不触 SQL 字面量/具体方言类」变成 CI 断言
 archunit = "1.4.0"
+# 拼音检索码（M1-04）：正牌 TinyPinyin（Apache-2.0、自带拼音表、无 pinyin4j 传递依赖）；JitPack 提供，非 BOM 管理故锁版。
+tinyPinyin = "2.0.3"
 
 [libraries]
 # --- build-logic 约定插件编译期需要的插件载体（模块内不引用） ---
@@ -52,6 +54,8 @@ flyway-mysql = { module = "org.flywaydb:flyway-mysql" }
 caffeine = { module = "com.github.ben-manes.caffeine:caffeine" }
 # 架构门禁（M1-02）：ArchUnit 核心 API（不引 junit5 扩展，用普通 JUnit 测试直接 evaluate 规则）
 archunit = { module = "com.tngtech.archunit:archunit", version.ref = "archunit" }
+# 拼音检索码（M1-04）：名称字段全拼检索码生成（JitPack，Apache-2.0）
+tinyPinyin = { module = "com.github.promeg:TinyPinyin", version.ref = "tinyPinyin" }
 
 [bundles]
 # 全模块通用的单元测试栈（L1 纯函数单测的地基）

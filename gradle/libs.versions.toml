@@ -13,7 +13,7 @@ springBoot = "4.1.1"
 spotless = "8.10.2"
 ktlint = "1.8.0"
 # 架构门禁（M1-02 红线④⑤）：把「方言只在 core.schema.dialect、业务层不触 SQL 字面量/具体方言类」变成 CI 断言
-archunit = "1.4.0"
+archunit = "1.5.0"
 # 拼音检索码（M1-04）：正牌 TinyPinyin（Apache-2.0、自带拼音表、无 pinyin4j 传递依赖）；JitPack 提供，非 BOM 管理故锁版。
 tinyPinyin = "2.0.3"
 

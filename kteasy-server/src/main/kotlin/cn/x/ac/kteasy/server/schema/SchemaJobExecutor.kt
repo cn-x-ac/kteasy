@@ -341,7 +341,7 @@ class SchemaJobExecutor(
 
             is StepOp.AddVirtualColumn -> {
                 val host = provider.namespace.qualified(op.hostArea, op.hostTable)
-                addColumnWithFallback(template, provider.column.addNullableColumn(host, op.column.name, valueCastOf(op.column.type)))
+                addColumnWithFallback(template, provider.column.addNullableColumn(host, op.column.name, op.cast))
             }
 
             is StepOp.BackfillBatch -> {
@@ -519,6 +519,7 @@ class SchemaJobExecutor(
                     "colName" to op.column.name,
                     "colType" to op.column.type.name,
                     "colLen" to (op.column.length?.toString() ?: ""),
+                    "cast" to op.cast.name,
                 )
             }
 
@@ -582,12 +583,16 @@ class SchemaJobExecutor(
         return when (kind) {
             cn.x.ac.kteasy.core.schema.StepKind.ADD_VIRTUAL_COLUMN -> {
                 val len = m["colLen"]?.toIntOrNull()
+                val colType = ColumnType.valueOf(m.getValue("colType"))
+                val col = PhysicalColumn(m.getValue("colName"), colType, len)
                 StepOp.AddVirtualColumn(
                     area,
                     m.getValue("host"),
-                    PhysicalColumn(m.getValue("colName"), ColumnType.valueOf(m.getValue("colType")), len),
+                    col,
                     m.getValue("colName"),
                     false,
+                    // 计划期权威 cast；旧作业缺此键时回退 ColumnType 兜底（M1-04 块 5 前的 checkpoint 兼容，见 DECISIONS D1）。
+                    m["cast"]?.let { runCatching { ValueCast.valueOf(it) }.getOrNull() } ?: valueCastOf(colType),
                 )
             }
 

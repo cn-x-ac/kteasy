@@ -105,6 +105,8 @@ sealed class StepOp {
         val column: PhysicalColumn,
         val expressionSourceColumn: String,
         val index: Boolean,
+        /** 该列的权威类型解释（由 `TypeRegistry.cast` 于计划期供给；执行器据此建可空列，不再从 ColumnType 猜）。 */
+        val cast: ValueCast,
     ) : StepOp()
 
     /** 分批回填（每批 [batchSize]、幂等谓词「目标列 IS NULL」，checkpoint 记 last_id）。 */
@@ -454,7 +456,7 @@ object SchemaDiff {
         makeIndex: Boolean,
     ): List<SchemaStep> {
         val steps = mutableListOf<SchemaStep>()
-        steps += step(objectId, StepKind.ADD_VIRTUAL_COLUMN, StepOp.AddVirtualColumn(LogicalArea.ENTITY, hostTable, column, fieldApi, makeIndex))
+        steps += step(objectId, StepKind.ADD_VIRTUAL_COLUMN, StepOp.AddVirtualColumn(LogicalArea.ENTITY, hostTable, column, fieldApi, makeIndex, cast))
         steps += step(objectId, StepKind.BACKFILL_BATCH, StepOp.BackfillBatch(LogicalArea.ENTITY, hostTable, fieldApi, fieldApi, cast, BACKFILL_BATCH_SIZE))
         if (makeIndex) {
             steps += step(objectId, StepKind.ADD_INDEX_EXPR, StepOp.AddIndexExpr(LogicalArea.ENTITY, hostTable, "ix_${hostTable}_$fieldApi", "ext", listOf(fieldApi), cast, online = true))
@@ -462,5 +464,28 @@ object SchemaDiff {
         steps += step(objectId, StepKind.SWITCH_READ, StepOp.SwitchRead(fieldId, hostTable, fieldApi))
         steps += step(objectId, StepKind.CLEAN_EXT_KEY, StepOp.CleanExtKey(LogicalArea.ENTITY, hostTable, fieldApi, "ext", listOf(fieldApi), BACKFILL_BATCH_SIZE))
         return steps.mapIndexed { i, s -> s.copy(seq = i) }
+    }
+
+    /**
+     * 可物理化标量 → 真列定义（M1-04 块 5 `type-convert`：EXT 标量提为可写真列）。
+     *
+     * 仅覆盖 `FieldType.physicalizable=true` 的标量；非可物理化型返回 null（调用方先行守卫）。
+     * **现状限制（S8，见 DECISIONS D4）**：`ColumnType` 尚无 `DATE`/`DECIMAL`，故 `DATE`/`DECIMAL` 暂以规范串
+     * `VARCHAR` 物化（存 `yyyy-MM-dd` / 十进制串），其类型语义与数值聚合正确性待扩 `ColumnType` 后转 native。
+     */
+    fun physicalColumnOf(field: MdField): PhysicalColumn? {
+        val api = field.apiName
+        return when (field.logicalType) {
+            LogicalType.TEXT -> PhysicalColumn(api, ColumnType.VARCHAR, 512)
+            LogicalType.TEXTAREA -> PhysicalColumn(api, ColumnType.TEXT)
+            LogicalType.PHONE, LogicalType.EMAIL, LogicalType.URL, LogicalType.PICKLIST, LogicalType.TIME -> PhysicalColumn(api, ColumnType.VARCHAR, 64)
+            LogicalType.NUMBER -> PhysicalColumn(api, ColumnType.BIGINT)
+            LogicalType.DECIMAL -> PhysicalColumn(api, ColumnType.VARCHAR, 32)
+            LogicalType.DATE -> PhysicalColumn(api, ColumnType.VARCHAR, 10)
+            LogicalType.DATETIME -> PhysicalColumn(api, ColumnType.TIMESTAMP)
+            LogicalType.BOOL -> PhysicalColumn(api, ColumnType.BOOLEAN)
+            LogicalType.LOCATION -> PhysicalColumn(api, ColumnType.VARCHAR, 512)
+            else -> null
+        }
     }
 }

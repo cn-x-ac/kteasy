@@ -18,8 +18,10 @@ package cn.x.ac.kteasy.core.schema
 import cn.x.ac.kteasy.core.meta.LogicalType
 import cn.x.ac.kteasy.core.meta.MdField
 import cn.x.ac.kteasy.core.meta.MdObject
+import cn.x.ac.kteasy.core.meta.MetadataValidator
 import cn.x.ac.kteasy.core.meta.ObjectKind
 import cn.x.ac.kteasy.core.meta.StorageKind
+import cn.x.ac.kteasy.core.meta.TypeRegistry
 import cn.x.ac.kteasy.core.schema.dialect.ColumnDefault
 import cn.x.ac.kteasy.core.schema.dialect.ColumnType
 import cn.x.ac.kteasy.core.schema.dialect.ForeignKeySpec
@@ -200,6 +202,11 @@ object SchemaDiff {
 
     private const val DICT_PATH_LEN = 512
 
+    /** 拼音检索码伴生列后缀与长度（M1-04 块 3：快查 ∩ 可拼音字段各配一条 varchar 真列 + btree）。 */
+    private const val PINYIN_SUFFIX = "_pinyin"
+
+    private const val PINYIN_LEN = 255
+
     /** 物理化回填 / 清 ext key 的每批行数（卡面 2000，⟨可逆⟩）。 */
     private const val BACKFILL_BATCH_SIZE = 2000
 
@@ -292,8 +299,36 @@ object SchemaDiff {
             idx?.let { idxs += it }
         }
 
+        // 拼音检索码伴生真列（M1-04 块 3）：快查字段 ∩ 可拼音型，各配 `<api>_pinyin` varchar + btree。
+        // 源字段即便存于 ext（无独立真列），此列仍单独物化——供 EQL 前缀命中（M1-05）与检索码回填（M1-06）。
+        pinyinCompanions(obj, enabled).forEach { (col, idx) ->
+            cols += col
+            idxs += idx
+        }
+
         val spec = TableSpec(LogicalArea.ENTITY, obj.apiName, cols, fks, indexes = idxs)
         return step(obj.id, StepKind.CREATE_TABLE, StepOp.CreateTable(spec))
+    }
+
+    /**
+     * 拼音检索码伴生列声明（M1-04 块 3）：对象快查字段集（`quickSearchJson`）与「可拼音型」
+     * （[cn.x.ac.kteasy.core.meta.FieldType.pinyinGeneratable]）的交集，取每个**启用**字段配一条
+     * `<api>_pinyin` varchar 真列 + btree 索引。数字/布尔/日期/引用等非可拼音型即使被标快查也不产列。
+     *
+     * 本函数只做**方言无关的声明**：物理落列复用 M1-03 `TableOps.addColumn`/`IndexOps.createIndex`（增量路径），
+     * 检索码值写入/回填归 M1-06 写通道，EQL `~` 端到端命中归 M1-05——M1-04 只保证「列存在且为可前缀检索的真列」。
+     */
+    private fun pinyinCompanions(
+        obj: MdObject,
+        enabled: List<MdField>,
+    ): List<Pair<PhysicalColumn, IndexSpec>> {
+        val quick = MetadataValidator.parseStringArray(obj.quickSearchJson)?.toSet() ?: return emptyList()
+        return enabled
+            .filter { it.apiName in quick && TypeRegistry.of(it.logicalType).pinyinGeneratable }
+            .map { f ->
+                val col = "${f.apiName}$PINYIN_SUFFIX"
+                PhysicalColumn(col, ColumnType.VARCHAR, PINYIN_LEN) to IndexSpec("ix_${obj.apiName}_$col", listOf(col))
+            }
     }
 
     /**

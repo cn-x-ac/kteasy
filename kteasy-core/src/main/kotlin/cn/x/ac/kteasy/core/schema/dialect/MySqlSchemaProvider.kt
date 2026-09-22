@@ -298,7 +298,7 @@ private object MyIntrospection : IntrospectionOps {
 
 /** MySQL 单列定义（含 NOT NULL / DEFAULT）；主键改由表级 `PRIMARY KEY` 约束。 */
 private fun PhysicalColumn.toMySqlColumnDef(): String {
-    val sb = StringBuilder("$name ${type.toMySqlType(length)}")
+    val sb = StringBuilder("$name ${type.toMySqlType(length, scale)}")
     if (binaryCollation) sb.append(" COLLATE utf8mb4_bin")
     if (!nullable && !primaryKey) sb.append(" NOT NULL")
     when (val d = default) {
@@ -311,7 +311,10 @@ private fun PhysicalColumn.toMySqlColumnDef(): String {
 }
 
 /** 由 [ColumnType]（可含 [length]）渲染 MySQL 列类型。 */
-private fun ColumnType.toMySqlType(length: Int?): String =
+private fun ColumnType.toMySqlType(
+    length: Int?,
+    scale: Int?,
+): String =
     when (this) {
         ColumnType.VARCHAR -> "varchar(${requireNotNull(length) { "VARCHAR 须带 length" }})"
         ColumnType.TEXT -> "longtext"
@@ -319,6 +322,8 @@ private fun ColumnType.toMySqlType(length: Int?): String =
         ColumnType.INTEGER -> "int"
         ColumnType.BOOLEAN -> "boolean"
         ColumnType.TIMESTAMP -> "datetime(6)"
+        ColumnType.DATE -> "date"
+        ColumnType.DECIMAL -> "decimal(${requireNotNull(length) { "DECIMAL 须带 precision" }}, ${requireNotNull(scale) { "DECIMAL 须带 scale" }})"
         ColumnType.JSON -> "json"
     }
 

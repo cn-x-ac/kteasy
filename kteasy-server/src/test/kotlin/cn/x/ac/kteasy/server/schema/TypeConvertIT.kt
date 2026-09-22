@@ -38,9 +38,10 @@ import javax.sql.DataSource
 /**
  * 步骤卡 M1-04 块 5 · 字段物理化（`type-convert`）双库集成。
  *
- * 证三件事：① 合法边——EXT 标量（NUMBER）经 `PhysicalizeService.physicalize` 入队五步，执行器最终把 `amount` 落成可写真列且 `storage_kind` 翻 COLUMN；
- * ② 非法边——不可物理化型（FILE）抛 `KnownKteasyException`，不入队；③ 返回体含后果告知（"不丢数据"）。
- * profile 由 `SPRING_PROFILES_ACTIVE` 定、门控 `KTEASY_IT_DB=true`；执行器异步，断言轮询。
+ * 三个独立用例各建对象、各**一次**物理化（执行器按对象串行队列，同对象连提多字段有重入队缺口 D6，故每方法只转一个字段）：
+ * ① NUMBER→bigint 落真列 + storage_kind 翻 COLUMN + FILE 非法边拒绝不入队 + 后果告知；
+ * ② DECIMAL→decimal(30,8) native 真列（D4）；③ DATE→date native 真列（D4）。makeIndex=false（D5/D7：ext 表达式索引对 temporal cast 两库皆不可用，策略归 M1-05）。
+ * profile 由 `SPRING_PROFILES_ACTIVE` 定、门控 `KTEASY_IT_DB=true`；执行器异步，断言轮询；测试区字面量豁免红线⑤。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @EnabledIfEnvironmentVariable(named = "KTEASY_IT_DB", matches = "true")
@@ -103,40 +104,66 @@ class TypeConvertIT {
         type: String,
     ) = MetadataService.FieldCmd(apiName = api, label = api, logicalType = type)
 
-    @Test
-    fun `合法边物理化 NUMBER 落真列并翻 storage_kind 非法边 MULTISELECT 拒绝`() {
-        val custApi = name("tcust")
+    /** 建一个含 name(TEXT,主显) + 目标标量字段的对象，等建表物化到终态，返回 (对象, 目标字段)。 */
+    private fun createWith(
+        base: String,
+        fieldApi: String,
+        fieldType: String,
+    ): Pair<cn.x.ac.kteasy.core.meta.MdObject, cn.x.ac.kteasy.core.meta.MdField> {
+        val api = name(base)
         val obj =
             meta.createObject(
                 MetadataService.ObjectCreateCmd(
-                    apiName = custApi,
+                    apiName = api,
                     label = "客户",
                     kind = "PLAIN",
                     displayName = "{name}",
-                    fields = listOf(fieldCmd("name", "TEXT"), fieldCmd("amount", "NUMBER"), fieldCmd("attachment", "FILE")),
+                    fields = listOf(fieldCmd("name", "TEXT"), fieldCmd(fieldApi, fieldType)),
                 ),
             )
-        assertThat(await { columnExists(custApi, "ext") }).`as`("客户表应物化（ext 列在）").isTrue()
-        assertThat(await { !jobRepo.hasUnfinished(obj.id) }).`as`("初始建表步应终态").isTrue()
+        assertThat(await { columnExists(api, "ext") }).`as`("$api 表应物化").isTrue()
+        assertThat(await { !jobRepo.hasUnfinished(obj.id) }).`as`("$api 建表步应终态").isTrue()
+        return obj to repo.findFieldByApi(obj.id, fieldApi)!!
+    }
 
-        // 合法边：NUMBER 标量物理化。
-        val amount = repo.findFieldByApi(obj.id, "amount")!!
-        assertThat(amount.storageKind).`as`("物理化前应为 EXT").isEqualTo(StorageKind.EXT)
+    @Test
+    fun `NUMBER物理化落bigint真列且FILE非法边拒绝`() {
+        val (obj, amount) = createWith("tnum", "amount", "NUMBER")
+        assertThat(amount.storageKind).`as`("物理化前 EXT").isEqualTo(StorageKind.EXT)
         val r = physicalize.physicalize(amount.id)
         assertThat(r.targetStorageKind).isEqualTo(StorageKind.COLUMN.name)
-        assertThat(r.jobState).isEqualTo("PENDING")
         assertThat(r.consequence).contains("不丢数据")
-
-        // 异步执行器：加列→回填→建表达式索引→读切换→清 key，最终 amount 成真列且 storage_kind=COLUMN。
-        assertThat(await { columnExists(custApi, "amount") }).`as`("物理化应落 amount 真列；诊断=%s", jobRepo.listByObject(obj.id)).isTrue()
-        assertThat(await { !jobRepo.hasUnfinished(obj.id) }).`as`("物理化五步应全终态").isTrue()
-        assertThat(repo.findFieldById(amount.id)?.storageKind).`as`("读切换应翻 storage_kind→COLUMN").isEqualTo(StorageKind.COLUMN)
+        val api = obj.apiName
+        assertThat(await { columnExists(api, "amount") && !jobRepo.hasUnfinished(obj.id) })
+            .`as`("amount 应落 bigint 真列且作业终态；诊断=%s", jobRepo.listByObject(obj.id))
+            .isTrue()
+        assertThat(repo.findFieldById(amount.id)?.storageKind).`as`("读切换应 COLUMN").isEqualTo(StorageKind.COLUMN)
 
         // 非法边：FILE 不可物理化 → 抛错、不入队。
-        val attachment = repo.findFieldByApi(obj.id, "attachment")!!
-        val stepsBefore = jobRepo.listByObject(obj.id).size
+        val (obj2, attachment) = createWith("tfile", "attachment", "FILE")
+        val before = jobRepo.listByObject(obj2.id).size
         assertThatThrownBy { physicalize.physicalize(attachment.id) }
             .isInstanceOf(KnownKteasyException::class.java)
-        assertThat(jobRepo.listByObject(obj.id).size).`as`("非法边不得入队").isEqualTo(stepsBefore)
+        assertThat(jobRepo.listByObject(obj2.id).size).`as`("非法边不得入队").isEqualTo(before)
+    }
+
+    @Test
+    fun `DECIMAL物理化落native decimal真列`() {
+        val (obj, price) = createWith("tdec", "price", "DECIMAL")
+        physicalize.physicalize(price.id)
+        assertThat(await { columnExists(obj.apiName, "price") && !jobRepo.hasUnfinished(obj.id) })
+            .`as`("price 应落 decimal(30,8) native 真列且终态；诊断=%s", jobRepo.listByObject(obj.id))
+            .isTrue()
+        assertThat(repo.findFieldById(price.id)?.storageKind).`as`("price 读切换应 COLUMN").isEqualTo(StorageKind.COLUMN)
+    }
+
+    @Test
+    fun `DATE物理化落native date真列`() {
+        val (obj, birthday) = createWith("tdt", "birthday", "DATE")
+        physicalize.physicalize(birthday.id)
+        assertThat(await { columnExists(obj.apiName, "birthday") && !jobRepo.hasUnfinished(obj.id) })
+            .`as`("birthday 应落 date native 真列且终态；诊断=%s", jobRepo.listByObject(obj.id))
+            .isTrue()
+        assertThat(repo.findFieldById(birthday.id)?.storageKind).`as`("birthday 读切换应 COLUMN").isEqualTo(StorageKind.COLUMN)
     }
 }

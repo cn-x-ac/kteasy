@@ -280,7 +280,7 @@ private object PgIntrospection : IntrospectionOps {
 
 /** PG 单列定义（含 NOT NULL / DEFAULT）；主键不在此内联，改由表级 `PRIMARY KEY` 约束。 */
 private fun PhysicalColumn.toPgColumnDef(): String {
-    val sb = StringBuilder("$name ${type.toPgType(length)}")
+    val sb = StringBuilder("$name ${type.toPgType(length, scale)}")
     if (binaryCollation) sb.append(" COLLATE \"C\"")
     if (!nullable && !primaryKey) sb.append(" NOT NULL")
     when (val d = default) {
@@ -293,7 +293,10 @@ private fun PhysicalColumn.toPgColumnDef(): String {
 }
 
 /** 由 [ColumnType]（可含 [length]）渲染 PG 列类型。 */
-private fun ColumnType.toPgType(length: Int?): String =
+private fun ColumnType.toPgType(
+    length: Int?,
+    scale: Int?,
+): String =
     when (this) {
         ColumnType.VARCHAR -> "varchar(${requireNotNull(length) { "VARCHAR 须带 length" }})"
         ColumnType.TEXT -> "text"
@@ -301,6 +304,8 @@ private fun ColumnType.toPgType(length: Int?): String =
         ColumnType.INTEGER -> "integer"
         ColumnType.BOOLEAN -> "boolean"
         ColumnType.TIMESTAMP -> "timestamptz"
+        ColumnType.DATE -> "date"
+        ColumnType.DECIMAL -> "numeric(${requireNotNull(length) { "DECIMAL 须带 precision" }}, ${requireNotNull(scale) { "DECIMAL 须带 scale" }})"
         ColumnType.JSON -> "jsonb"
     }
 

@@ -209,6 +209,11 @@ object SchemaDiff {
 
     private const val PINYIN_LEN = 255
 
+    /** DECIMAL 标量物理化落 native 定点列的精度/标度（字段配置的小数位仅展示用，存储统一此标度，见 DECISIONS D4）。 */
+    private const val DECIMAL_PRECISION = 30
+
+    private const val DECIMAL_SCALE = 8
+
     /** 物理化回填 / 清 ext key 的每批行数（卡面 2000，⟨可逆⟩）。 */
     private const val BACKFILL_BATCH_SIZE = 2000
 
@@ -470,8 +475,7 @@ object SchemaDiff {
      * 可物理化标量 → 真列定义（M1-04 块 5 `type-convert`：EXT 标量提为可写真列）。
      *
      * 仅覆盖 `FieldType.physicalizable=true` 的标量；非可物理化型返回 null（调用方先行守卫）。
-     * **现状限制（S8，见 DECISIONS D4）**：`ColumnType` 尚无 `DATE`/`DECIMAL`，故 `DATE`/`DECIMAL` 暂以规范串
-     * `VARCHAR` 物化（存 `yyyy-MM-dd` / 十进制串），其类型语义与数值聚合正确性待扩 `ColumnType` 后转 native。
+     * `DATE`/`DECIMAL` 落 native 列（DECIMAL(30,8)；字段配置的小数位仅展示，存储统一此标度，见 DECISIONS D4）。
      */
     fun physicalColumnOf(field: MdField): PhysicalColumn? {
         val api = field.apiName
@@ -480,8 +484,8 @@ object SchemaDiff {
             LogicalType.TEXTAREA -> PhysicalColumn(api, ColumnType.TEXT)
             LogicalType.PHONE, LogicalType.EMAIL, LogicalType.URL, LogicalType.PICKLIST, LogicalType.TIME -> PhysicalColumn(api, ColumnType.VARCHAR, 64)
             LogicalType.NUMBER -> PhysicalColumn(api, ColumnType.BIGINT)
-            LogicalType.DECIMAL -> PhysicalColumn(api, ColumnType.VARCHAR, 32)
-            LogicalType.DATE -> PhysicalColumn(api, ColumnType.VARCHAR, 10)
+            LogicalType.DECIMAL -> PhysicalColumn(api, ColumnType.DECIMAL, DECIMAL_PRECISION, scale = DECIMAL_SCALE)
+            LogicalType.DATE -> PhysicalColumn(api, ColumnType.DATE)
             LogicalType.DATETIME -> PhysicalColumn(api, ColumnType.TIMESTAMP)
             LogicalType.BOOL -> PhysicalColumn(api, ColumnType.BOOLEAN)
             LogicalType.LOCATION -> PhysicalColumn(api, ColumnType.VARCHAR, 512)

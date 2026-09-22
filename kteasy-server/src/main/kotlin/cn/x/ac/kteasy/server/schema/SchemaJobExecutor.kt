@@ -67,6 +67,9 @@ class SchemaJobExecutor(
     private val queue = LinkedBlockingQueue<String>()
     private val queued = ConcurrentHashMap<String, Boolean>()
 
+    /** D6 补排标志：对象正被处理时到达的新 submit 记在这里，`drain` 处理完清 `queued` 后据此重排一次。 */
+    private val requeue = ConcurrentHashMap.newKeySet<String>()
+
     @Volatile
     private var running = false
     private var worker: Thread? = null
@@ -109,7 +112,11 @@ class SchemaJobExecutor(
 
     /** 提交一个对象的物化请求（同对象在队列内合并去重）。 */
     fun submit(objectId: String) {
-        if (queued.putIfAbsent(objectId, true) == null) {
+        if (queued.putIfAbsent(objectId, true) != null) {
+            // D6：该对象已在排队/处理中——本次提交不另入队，但标记补排：drain 处理完会据此再排一次，
+            // 防止「process 进行中紧接的 submit」（如 createObject 后立刻 type-convert）被去重吞掉、账本步永停 PENDING。
+            requeue.add(objectId)
+        } else {
             queue.offer(objectId)
         }
     }
@@ -128,6 +135,10 @@ class SchemaJobExecutor(
                 log.error("物化作业处理对象异常 objectId={}", objectId, e)
             } finally {
                 queued.remove(objectId)
+                // 处理期间有新提交则补排一次；CAS 先行保证与 submit 之间无丢失信号（见 D6）。
+                if (requeue.remove(objectId) && queued.putIfAbsent(objectId, true) == null) {
+                    queue.offer(objectId)
+                }
             }
         }
     }
@@ -519,6 +530,8 @@ class SchemaJobExecutor(
                     "colName" to op.column.name,
                     "colType" to op.column.type.name,
                     "colLen" to (op.column.length?.toString() ?: ""),
+                    // D8：DECIMAL 的 scale 必须随 checkpoint 持久化，否则物理化重放重建 PhysicalColumn 撞 require（旧行无此键→null，兼容）。
+                    "colScale" to (op.column.scale?.toString() ?: ""),
                     "cast" to op.cast.name,
                 )
             }
@@ -584,7 +597,7 @@ class SchemaJobExecutor(
             cn.x.ac.kteasy.core.schema.StepKind.ADD_VIRTUAL_COLUMN -> {
                 val len = m["colLen"]?.toIntOrNull()
                 val colType = ColumnType.valueOf(m.getValue("colType"))
-                val col = PhysicalColumn(m.getValue("colName"), colType, len)
+                val col = PhysicalColumn(m.getValue("colName"), colType, len, scale = m["colScale"]?.toIntOrNull())
                 StepOp.AddVirtualColumn(
                     area,
                     m.getValue("host"),
@@ -652,6 +665,8 @@ class SchemaJobExecutor(
             ColumnType.BIGINT, ColumnType.INTEGER -> ValueCast.LONG
             ColumnType.BOOLEAN -> ValueCast.BOOL
             ColumnType.TIMESTAMP -> ValueCast.TIMESTAMP
+            ColumnType.DATE -> ValueCast.DATE
+            ColumnType.DECIMAL -> ValueCast.DOUBLE
         }
 
     companion object {

@@ -39,6 +39,12 @@ enum class ColumnType {
     /** 带时区时刻（PG `timestamptz` / MySQL `DATETIME(6)`）。 */
     TIMESTAMP,
 
+    /** 纯日期（PG `date` / MySQL `date`；无时区、无时刻）。 */
+    DATE,
+
+    /** 定点小数（PG `numeric(precision, scale)` / MySQL `DECIMAL(precision, scale)`；precision=[length]、scale=[PhysicalColumn.scale]）。 */
+    DECIMAL,
+
     /** JSON 文档列（PG `jsonb` / MySQL `json`）。 */
     JSON,
 }
@@ -60,6 +66,8 @@ data class PhysicalColumn(
     val name: String,
     val type: ColumnType,
     val length: Int? = null,
+    /** [ColumnType.DECIMAL] 的标度（小数位）；此时 [length] 为总精度。非 DECIMAL 忽略。 */
+    val scale: Int? = null,
     val nullable: Boolean = true,
     val primaryKey: Boolean = false,
     val default: ColumnDefault? = null,
@@ -75,6 +83,9 @@ data class PhysicalColumn(
         require(name.isNotBlank()) { "列名不能为空" }
         if (type == ColumnType.VARCHAR) {
             require(length != null && length > 0) { "VARCHAR 列 [$name] 必须给定 length" }
+        }
+        if (type == ColumnType.DECIMAL) {
+            require(length != null && length > 0 && scale != null && scale >= 0) { "DECIMAL 列 [$name] 必须给定 precision(length) 与 scale" }
         }
         require(!(primaryKey && nullable)) { "主键列 [$name] 不得可空" }
         require(!(binaryCollation && type != ColumnType.VARCHAR)) { "仅字符串列可钉 binary 排序规则：[$name]" }

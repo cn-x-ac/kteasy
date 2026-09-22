@@ -58,7 +58,9 @@ class PhysicalizeService(
         }
         val column = SchemaDiff.physicalColumnOf(field) ?: throw KnownKteasyException(ApiError.INVALID_PARAM, "字段 [${field.apiName}] 无可用真列映射")
         val cast = ft.cast ?: throw KnownKteasyException(ApiError.INVALID_PARAM, "字段类型 ${field.logicalType} 缺 ValueCast")
-        // makeIndex=false：物理化后是真列（EQL 直查），迁移期 ext 表达式索引非必需；且 MySQL 对刚建 VIRTUAL 列加表达式索引不支持 LOCK=NONE（见 DECISIONS D5）。
+        // makeIndex=false（D5 定稿）：块 5 闭环只需「EXT 标量→可写真列」，物理化后 EQL 直查真列，迁移期 ext 表达式索引非必需。
+        // D7 实证（PG/MySQL 取证）：ADD_INDEX_EXPR 对 temporal cast 两库皆不可用——PG text→date/timestamp cast 非 IMMUTABLE（42P17，
+        // bigint/numeric/text 可）；MySQL 对 JSON 列本身禁止函数索引（3756，与 LOCK 级别无关，1846 只是次生）。在线索引策略整体归 M1-05（虚拟列桥）。
         val steps = SchemaDiff.planPhysicalize(obj.id, obj.apiName, field.id, field.apiName, column, cast, makeIndex = false)
         executor.submitPhysicalization(obj.id, steps)
         return PhysicalizeResult(obj.id, obj.apiName, field.id, field.apiName, StorageKind.COLUMN.name, "PENDING", CONSEQUENCE)

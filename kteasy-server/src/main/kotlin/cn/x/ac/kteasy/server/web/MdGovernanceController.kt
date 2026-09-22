@@ -24,6 +24,7 @@ import cn.x.ac.kteasy.server.md.MetadataService.FieldCmd
 import cn.x.ac.kteasy.server.md.MetadataService.FieldUpdateCmd
 import cn.x.ac.kteasy.server.md.MetadataService.ObjectCreateCmd
 import cn.x.ac.kteasy.server.md.MetadataService.ObjectUpdateCmd
+import cn.x.ac.kteasy.server.schema.PhysicalizeService
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -48,6 +49,7 @@ class MdGovernanceController(
     private val cache: MetadataGraphCache,
     private val provider: SchemaProvider,
     private val context: KteasyContext,
+    private val physicalize: PhysicalizeService,
 ) {
     // ---------- 对象 ----------
 
@@ -160,6 +162,30 @@ class MdGovernanceController(
     fun disableField(
         @PathVariable fieldId: String,
     ): ResponseEntity<Map<String, Any?>> = ok(service.disableFieldById(fieldId))
+
+    /**
+     * `POST /api/md/field/{fieldId}/type-convert`（M1-04 块 5）：把字段从 EXT 标量迁移为可写真列（物理化）。
+     * 块 5 仅 `physicalize=true` 一种动作；非法边由服务层抛 `INVALID_PARAM`，经全局 handler 转三键契约体。
+     */
+    @PostMapping("/field/{fieldId}/type-convert")
+    fun typeConvert(
+        @PathVariable fieldId: String,
+        @RequestBody body: Map<String, Any?>,
+    ): ResponseEntity<Map<String, Any?>> {
+        requireThat(optionalBool(body, "physicalize") ?: true, "块 5 type-convert 仅支持 physicalize=true（类型间转换归 M1-06）")
+        val r = physicalize.physicalize(fieldId)
+        return ok(
+            linkedMapOf(
+                "object_id" to r.objectId,
+                "object_api" to r.objectApi,
+                "field_id" to r.fieldId,
+                "field_api" to r.fieldApi,
+                "target_storage_kind" to r.targetStorageKind,
+                "job_state" to r.jobState,
+                "consequence" to r.consequence,
+            ),
+        )
+    }
 
     // ---------- 版本 ----------
 

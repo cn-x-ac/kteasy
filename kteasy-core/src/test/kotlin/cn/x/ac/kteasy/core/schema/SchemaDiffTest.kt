@@ -99,6 +99,31 @@ class SchemaDiffTest {
     }
 
     @Test
+    fun `快查可拼音字段建表落 pinyin 真列与 btree 非可拼音快查字段不落`() {
+        val name = extField("name")
+        val amount =
+            MdField(
+                id = "F_amount",
+                objectId = "OBJ1",
+                apiName = "amount",
+                label = "金额",
+                logicalType = LogicalType.DECIMAL,
+                storageKind = StorageKind.EXT,
+                enabled = true,
+            )
+        val quick = obj.copy(quickSearchJson = """["name","amount"]""")
+        val steps = SchemaDiff.diff(input(listOf(name, amount), MaterializedState(tableExists = false), meta = quick))
+
+        val create = steps.first { it.kind == CREATE_TABLE }.op as StepOp.CreateTable
+        val colNames = create.spec.columns.map { it.name }
+        // name(TEXT 可拼音) 快查 → 落 name_pinyin 真列；amount(DECIMAL 非可拼音) 快查但不落检索码列；
+        // 源字段本体仍只进 ext（不因此产出 name/amount 真列）。
+        assertThat(colNames).contains("name_pinyin")
+        assertThat(colNames).doesNotContain("amount_pinyin", "name", "amount")
+        assertThat(create.spec.indexes.map { it.columns.single() }).contains("name_pinyin")
+    }
+
+    @Test
     fun `已存在对象连加20标量字段 零步`() {
         val base = listOf(refField("owner_ref"))
         val twentyScalars = (1..20).map { extField("s$it") }

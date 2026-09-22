@@ -18,8 +18,10 @@ package cn.x.ac.kteasy.core.schema
 import cn.x.ac.kteasy.core.meta.LogicalType
 import cn.x.ac.kteasy.core.meta.MdField
 import cn.x.ac.kteasy.core.meta.MdObject
+import cn.x.ac.kteasy.core.meta.MetadataValidator
 import cn.x.ac.kteasy.core.meta.ObjectKind
 import cn.x.ac.kteasy.core.meta.StorageKind
+import cn.x.ac.kteasy.core.meta.TypeRegistry
 import cn.x.ac.kteasy.core.schema.dialect.ColumnDefault
 import cn.x.ac.kteasy.core.schema.dialect.ColumnType
 import cn.x.ac.kteasy.core.schema.dialect.ForeignKeySpec
@@ -103,6 +105,8 @@ sealed class StepOp {
         val column: PhysicalColumn,
         val expressionSourceColumn: String,
         val index: Boolean,
+        /** 该列的权威类型解释（由 `TypeRegistry.cast` 于计划期供给；执行器据此建可空列，不再从 ColumnType 猜）。 */
+        val cast: ValueCast,
     ) : StepOp()
 
     /** 分批回填（每批 [batchSize]、幂等谓词「目标列 IS NULL」，checkpoint 记 last_id）。 */
@@ -200,6 +204,16 @@ object SchemaDiff {
 
     private const val DICT_PATH_LEN = 512
 
+    /** 拼音检索码伴生列后缀与长度（M1-04 块 3：快查 ∩ 可拼音字段各配一条 varchar 真列 + btree）。 */
+    private const val PINYIN_SUFFIX = "_pinyin"
+
+    private const val PINYIN_LEN = 255
+
+    /** DECIMAL 标量物理化落 native 定点列的精度/标度（字段配置的小数位仅展示用，存储统一此标度，见 DECISIONS D4）。 */
+    private const val DECIMAL_PRECISION = 30
+
+    private const val DECIMAL_SCALE = 8
+
     /** 物理化回填 / 清 ext key 的每批行数（卡面 2000，⟨可逆⟩）。 */
     private const val BACKFILL_BATCH_SIZE = 2000
 
@@ -292,8 +306,36 @@ object SchemaDiff {
             idx?.let { idxs += it }
         }
 
+        // 拼音检索码伴生真列（M1-04 块 3）：快查字段 ∩ 可拼音型，各配 `<api>_pinyin` varchar + btree。
+        // 源字段即便存于 ext（无独立真列），此列仍单独物化——供 EQL 前缀命中（M1-05）与检索码回填（M1-06）。
+        pinyinCompanions(obj, enabled).forEach { (col, idx) ->
+            cols += col
+            idxs += idx
+        }
+
         val spec = TableSpec(LogicalArea.ENTITY, obj.apiName, cols, fks, indexes = idxs)
         return step(obj.id, StepKind.CREATE_TABLE, StepOp.CreateTable(spec))
+    }
+
+    /**
+     * 拼音检索码伴生列声明（M1-04 块 3）：对象快查字段集（`quickSearchJson`）与「可拼音型」
+     * （[cn.x.ac.kteasy.core.meta.FieldType.pinyinGeneratable]）的交集，取每个**启用**字段配一条
+     * `<api>_pinyin` varchar 真列 + btree 索引。数字/布尔/日期/引用等非可拼音型即使被标快查也不产列。
+     *
+     * 本函数只做**方言无关的声明**：物理落列复用 M1-03 `TableOps.addColumn`/`IndexOps.createIndex`（增量路径），
+     * 检索码值写入/回填归 M1-06 写通道，EQL `~` 端到端命中归 M1-05——M1-04 只保证「列存在且为可前缀检索的真列」。
+     */
+    private fun pinyinCompanions(
+        obj: MdObject,
+        enabled: List<MdField>,
+    ): List<Pair<PhysicalColumn, IndexSpec>> {
+        val quick = MetadataValidator.parseStringArray(obj.quickSearchJson)?.toSet() ?: return emptyList()
+        return enabled
+            .filter { it.apiName in quick && TypeRegistry.of(it.logicalType).pinyinGeneratable }
+            .map { f ->
+                val col = "${f.apiName}$PINYIN_SUFFIX"
+                PhysicalColumn(col, ColumnType.VARCHAR, PINYIN_LEN) to IndexSpec("ix_${obj.apiName}_$col", listOf(col))
+            }
     }
 
     /**
@@ -419,7 +461,7 @@ object SchemaDiff {
         makeIndex: Boolean,
     ): List<SchemaStep> {
         val steps = mutableListOf<SchemaStep>()
-        steps += step(objectId, StepKind.ADD_VIRTUAL_COLUMN, StepOp.AddVirtualColumn(LogicalArea.ENTITY, hostTable, column, fieldApi, makeIndex))
+        steps += step(objectId, StepKind.ADD_VIRTUAL_COLUMN, StepOp.AddVirtualColumn(LogicalArea.ENTITY, hostTable, column, fieldApi, makeIndex, cast))
         steps += step(objectId, StepKind.BACKFILL_BATCH, StepOp.BackfillBatch(LogicalArea.ENTITY, hostTable, fieldApi, fieldApi, cast, BACKFILL_BATCH_SIZE))
         if (makeIndex) {
             steps += step(objectId, StepKind.ADD_INDEX_EXPR, StepOp.AddIndexExpr(LogicalArea.ENTITY, hostTable, "ix_${hostTable}_$fieldApi", "ext", listOf(fieldApi), cast, online = true))
@@ -427,5 +469,27 @@ object SchemaDiff {
         steps += step(objectId, StepKind.SWITCH_READ, StepOp.SwitchRead(fieldId, hostTable, fieldApi))
         steps += step(objectId, StepKind.CLEAN_EXT_KEY, StepOp.CleanExtKey(LogicalArea.ENTITY, hostTable, fieldApi, "ext", listOf(fieldApi), BACKFILL_BATCH_SIZE))
         return steps.mapIndexed { i, s -> s.copy(seq = i) }
+    }
+
+    /**
+     * 可物理化标量 → 真列定义（M1-04 块 5 `type-convert`：EXT 标量提为可写真列）。
+     *
+     * 仅覆盖 `FieldType.physicalizable=true` 的标量；非可物理化型返回 null（调用方先行守卫）。
+     * `DATE`/`DECIMAL` 落 native 列（DECIMAL(30,8)；字段配置的小数位仅展示，存储统一此标度，见 DECISIONS D4）。
+     */
+    fun physicalColumnOf(field: MdField): PhysicalColumn? {
+        val api = field.apiName
+        return when (field.logicalType) {
+            LogicalType.TEXT -> PhysicalColumn(api, ColumnType.VARCHAR, 512)
+            LogicalType.TEXTAREA -> PhysicalColumn(api, ColumnType.TEXT)
+            LogicalType.PHONE, LogicalType.EMAIL, LogicalType.URL, LogicalType.PICKLIST, LogicalType.TIME -> PhysicalColumn(api, ColumnType.VARCHAR, 64)
+            LogicalType.NUMBER -> PhysicalColumn(api, ColumnType.BIGINT)
+            LogicalType.DECIMAL -> PhysicalColumn(api, ColumnType.DECIMAL, DECIMAL_PRECISION, scale = DECIMAL_SCALE)
+            LogicalType.DATE -> PhysicalColumn(api, ColumnType.DATE)
+            LogicalType.DATETIME -> PhysicalColumn(api, ColumnType.TIMESTAMP)
+            LogicalType.BOOL -> PhysicalColumn(api, ColumnType.BOOLEAN)
+            LogicalType.LOCATION -> PhysicalColumn(api, ColumnType.VARCHAR, 512)
+            else -> null
+        }
     }
 }

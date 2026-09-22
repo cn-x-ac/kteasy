@@ -33,11 +33,10 @@ dependencies {
     implementation(libs.spring.boot.starter.flyway)
     // M1-01：元数据图谱缓存（Caffeine 单飞加载，AFTER_COMMIT 失效）
     implementation(libs.caffeine)
-    // M1-04：名称字段拼音检索码生成器（core 保持零第三方依赖，故 TinyPinyin 落 server 编解码侧；块 3 使用）
-    implementation(libs.tinyPinyin) {
-        // JitPack 上两个可选词库子模块（短语/城市词典）pom 路径 404；基础单字全拼在主 jar，排除之
-        exclude(group = "com.github.promeg.TinyPinyin")
-    }
+    // M1-04：名称字段拼音检索码生成器（core 保持零第三方依赖，故 TinyPinyin 落 server 编解码侧；块 3 使用）。
+    // Maven Central 的 io.github.biezhi:TinyPinyin（Apache-2.0、类包名 com.github.promeg.pinyinhelper.Pinyin）；
+    // 唯一 compile 传递依赖 org.ahocorasick:ahocorasick 亦 Apache-2.0，pinyin4j 仅 test scope 不入产物——满足 NOTICE「仅宽松许可」。
+    implementation(libs.tinyPinyin)
     // 双库驱动随包装配（M0-02 只连不改数据，SQL 归 query/schema 模块）
     runtimeOnly(libs.postgresql)
     runtimeOnly(libs.mysql.connector.j)

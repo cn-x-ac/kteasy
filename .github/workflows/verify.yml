@@ -118,4 +118,7 @@ jobs:
             --tests "cn.x.ac.kteasy.server.schema.PhysicalizationIT" \
             --tests "cn.x.ac.kteasy.server.schema.SchemaJobApiIT" \
             --tests "cn.x.ac.kteasy.server.schema.StepFailureResumeIT" \
-            --tests "cn.x.ac.kteasy.server.schema.KillResumeIT"
+            --tests "cn.x.ac.kteasy.server.schema.KillResumeIT" \
+            --tests "cn.x.ac.kteasy.server.schema.PinyinColumnIT" \
+            --tests "cn.x.ac.kteasy.server.dialect.TypeCastExtIT" \
+            --tests "cn.x.ac.kteasy.server.schema.TypeConvertIT"

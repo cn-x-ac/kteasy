@@ -17,6 +17,8 @@ package cn.x.ac.kteasy.server
 
 import cn.x.ac.kteasy.core.kernel.Dialect
 import cn.x.ac.kteasy.core.kernel.KteasyContext
+import cn.x.ac.kteasy.core.query.PassthroughPrivilegeInjector
+import cn.x.ac.kteasy.core.query.PrivilegeInjector
 import cn.x.ac.kteasy.core.schema.dialect.SchemaProvider
 import cn.x.ac.kteasy.server.config.DataSourceDialectGuard
 import cn.x.ac.kteasy.server.config.KteasyProperties
@@ -54,6 +56,12 @@ class KteasyKernelConfig {
             dataDir = props.dataDir,
             version = engineVersion(),
         )
+
+    /**
+     * 权限注入器（M1-05 查询出口唯一化的可替换点）：本卡默认透传，M2-02 替换为真注入实现（换 bean 即可，查询层无感）。
+     */
+    @Bean
+    fun privilegeInjector(): PrivilegeInjector = PassthroughPrivilegeInjector()
 
     /** 解析并守卫方言↔连接串一致性（幂等纯计算，两 bean 各自调用无副作用）。 */
     private fun resolveDialect(

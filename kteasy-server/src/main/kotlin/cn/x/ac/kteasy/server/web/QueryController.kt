@@ -16,29 +16,47 @@
 package cn.x.ac.kteasy.server.web
 
 import cn.x.ac.kteasy.core.kernel.ApiError
+import cn.x.ac.kteasy.core.kernel.KnownKteasyException
+import cn.x.ac.kteasy.core.query.QueryContext
+import cn.x.ac.kteasy.server.query.QueryEngine
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 /**
- * EQL（实体查询语言）端点占位（M0-03 §5）。**只锁形状、不写解析器**（解析归 M1-05）。
+ * EQL 查询端点（卡面 §3 / 图纸 03）。**唯一出口**＝[QueryEngine]——控制器只做入参校验 + 上下文装配，
+ * 不自己解析/渲染/执行（否则破坏「查询出口唯一化」，M2 权限注入将现旁路）。
  *
- * 卡定：`POST /api/query` 返回 HTTP 501 + 契约样例 `error_code=420`，
- * 以此把「查询出口」的响应契约定型，防止各卡各写各的。
+ * 语法/语义/护栏错误经 [KnownKteasyException] 冒泡至全局异常处理器渲染为三键契约体（红线：禁裸 500）。
  */
 @RestController
 @RequestMapping("/api")
-class QueryController {
+class QueryController(
+    private val engine: QueryEngine,
+) {
     @PostMapping("/query")
-    fun queryPlaceholder(): ResponseEntity<Map<String, Any?>> =
-        ResponseEntity
-            .status(HttpStatus.NOT_IMPLEMENTED)
-            .body(
-                ApiError.BUSINESS_RULE.toBody(
-                    message = "EQL 查询解析尚未实现（M1-05 落地）",
-                    data = mapOf("endpoint" to "/api/query", "planned_milestone" to "M1-05"),
-                ),
+    fun query(
+        @RequestBody body: Map<String, Any?>,
+    ): ResponseEntity<Map<String, Any?>> {
+        val eql =
+            body["eql"] as? String
+                ?: return ResponseEntity
+                    .status(HttpStatus.valueOf(ApiError.INVALID_PARAM.httpStatus))
+                    .body(ApiError.INVALID_PARAM.toBody("缺少必填参数 'eql'", mapOf("error_id" to "EQL_SYNTAX")))
+        // M1-05 无鉴权上下文（M2 接入登录用户/角色）；时钟用系统默认时区的此刻。
+        val ctx = QueryContext(userId = null, now = ZonedDateTime.now(ZoneId.systemDefault()).withNano(0))
+        val result = engine.run(eql, ctx)
+        val data =
+            linkedMapOf<String, Any?>(
+                "rows" to result.rows,
+                "truncated" to result.truncated,
+                "elapsed_ms" to result.elapsedMs,
             )
+        return ResponseEntity.ok(linkedMapOf("error_code" to 0, "error_msg" to "ok", "data" to data))
+    }
 }

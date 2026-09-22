@@ -25,6 +25,9 @@ object SystemColumns {
     /** 主键列：26 位 ULID 字符串。 */
     const val ID = "id"
 
+    /** 扩展列（JSON）：标量自定义字段的存储容器。 */
+    const val EXT = "ext"
+
     /** 全部系统列（列名 = 物理列名，双库同构）。 */
     val ALL: List<String> =
         listOf(

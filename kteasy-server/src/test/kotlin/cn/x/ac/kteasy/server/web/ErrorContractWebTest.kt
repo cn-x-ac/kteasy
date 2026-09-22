@@ -27,9 +27,10 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 
 /**
- * 验收：`POST /api/query` 占位端点端到端返回 HTTP 501 + 严格三键契约体（error_code=420 样例，M0-03 §5）。
+ * 查询出口响应契约验收（M0-03 §5 立此锁三键形状；M1-05 端点已实装，本测改验「非法入参仍走严格三键契约体、禁裸 500」）。
  *
- * 与库无关，故关 Flyway；真起服真 HTTP，锁的就是「查询出口」的响应形状，供后续各卡对齐。
+ * `POST /api/query` 缺 `eql` → 400 + `{error_code:410, error_msg, data}`（`error_id=EQL_SYNTAX`）。与库无关，故关 Flyway；
+ * 控制器在调用查询引擎前即返回，不触达数据源。
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -43,18 +44,19 @@ class ErrorContractWebTest {
     private val client: HttpClient = HttpClient.newHttpClient()
 
     @Test
-    fun `api query 占位返回 501 且契约三键齐备`() {
+    fun `api query 缺 eql 返回 400 且契约三键齐备`() {
         val port = requireNotNull(environment.getProperty("local.server.port"))
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://127.0.0.1:$port/api/query"))
-                .POST(HttpRequest.BodyPublishers.noBody())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("""{"bogus":1}"""))
                 .build()
         val resp = client.send(request, HttpResponse.BodyHandlers.ofString())
 
-        assertThat(resp.statusCode()).isEqualTo(501)
+        assertThat(resp.statusCode()).isEqualTo(400)
         assertThat(resp.body())
-            .contains("\"error_code\":420")
+            .contains("\"error_code\":410")
             .contains("\"error_msg\":")
             .contains("\"data\":")
     }

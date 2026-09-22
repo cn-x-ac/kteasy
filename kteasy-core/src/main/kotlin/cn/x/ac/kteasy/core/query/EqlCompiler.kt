@@ -213,7 +213,12 @@ object EqlCompiler {
         root: MdObject,
         resolver: FieldResolver,
     ): OrderPlan {
-        if (key.path == null) return OrderPlan(null, requireNotNull(key.agg) { "排序键须为字段或聚合" }, key.dir)
+        if (key.path == null) {
+            val agg = requireNotNull(key.agg) { "排序键须为字段或聚合" }
+            // 聚合排序：解析其 arg（若有）到末端 location，供渲染器出 `FN(expr)`。count(*) 的 arg 为 null。
+            val argLoc = agg.arg?.let { resolver.resolveFromRoot(root, it).terminal.location }
+            return OrderPlan(argLoc, agg, key.dir)
+        }
         val rp = resolver.resolveFromRoot(root, key.path)
         if (rp.exists != null) throw EqlErrors.typeMismatch("不支持按穿过 N2N 的点链排序（本卡边界，见证据 §2）")
         return OrderPlan(rp.terminal.location, null, key.dir)

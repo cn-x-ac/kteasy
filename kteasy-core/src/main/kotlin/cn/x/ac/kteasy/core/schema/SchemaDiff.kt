@@ -333,7 +333,7 @@ object SchemaDiff {
         return enabled
             .filter { it.apiName in quick && TypeRegistry.of(it.logicalType).pinyinGeneratable }
             .map { f ->
-                val col = "${f.apiName}$PINYIN_SUFFIX"
+                val col = pinyinColumn(f.apiName)
                 PhysicalColumn(col, ColumnType.VARCHAR, PINYIN_LEN) to IndexSpec("ix_${obj.apiName}_$col", listOf(col))
             }
     }
@@ -390,9 +390,9 @@ object SchemaDiff {
         input: DiffInput,
     ): SchemaStep {
         val relLogical = relationTableLogicalName(obj, nf)
-        val sourceCol = "src_${obj.apiName}_id"
+        val sourceCol = relationSourceColumn(obj.apiName)
         val targetApi = nf.refObjectId?.let { input.objectApiById[it] }
-        val targetCol = targetApi?.let { "dst_${it}_id" } ?: "dst_id"
+        val targetCol = relationTargetColumn(targetApi)
         val cols =
             listOf(
                 PhysicalColumn("id", ColumnType.VARCHAR, ID_LEN, nullable = false, primaryKey = true, binaryCollation = true),
@@ -421,6 +421,18 @@ object SchemaDiff {
         obj: MdObject,
         nf: MdField,
     ): String = "${obj.apiName}_${nf.apiName}"
+
+    /**
+     * 拼音检索码伴生列名（`<api>_pinyin`）。**物化引擎与 EQL `~` 检索共用此口**（M1-05 命中的正是此列），
+     * 命名单一来源，避免两侧各拼一次致漂移。
+     */
+    fun pinyinColumn(fieldApi: String): String = "$fieldApi$PINYIN_SUFFIX"
+
+    /** N2N 关联表「源侧」引用列名（指向宿主对象行）。 */
+    fun relationSourceColumn(hostObjApi: String): String = "src_${hostObjApi}_id"
+
+    /** N2N 关联表「目标侧」引用列名；目标对象未知时退化为通用 `dst_id`（与 [buildCreateRelation] 一致）。 */
+    fun relationTargetColumn(targetApi: String?): String = targetApi?.let { "dst_${it}_id" } ?: "dst_id"
 
     private fun step(
         objectId: String,

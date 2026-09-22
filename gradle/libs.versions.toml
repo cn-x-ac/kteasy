@@ -13,7 +13,7 @@ springBoot = "4.1.1"
 spotless = "8.10.2"
 ktlint = "1.8.0"
 # 架构门禁（M1-02 红线④⑤）：把「方言只在 core.schema.dialect、业务层不触 SQL 字面量/具体方言类」变成 CI 断言
-archunit = "1.4.0"
+archunit = "1.5.0"
 # 拼音检索码（M1-04）：TinyPinyin 核心（Apache-2.0、自带拼音表、类包名 com.github.promeg.pinyinhelper.Pinyin）。
 # 取 Maven Central 上的 io.github.biezhi:TinyPinyin（promeg 正版的 Central 镜像，含 java 核心 + ahocorasick(Apache) 传递；
 # pinyin4j 仅 test scope 不进产物）。promeg 官方仓库只在 JitPack 且该 tag 仅产出 Android 词库、无 java 核心 jar，故弃 JitPack。

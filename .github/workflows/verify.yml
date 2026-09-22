@@ -121,4 +121,6 @@ jobs:
             --tests "cn.x.ac.kteasy.server.schema.KillResumeIT" \
             --tests "cn.x.ac.kteasy.server.schema.PinyinColumnIT" \
             --tests "cn.x.ac.kteasy.server.dialect.TypeCastExtIT" \
-            --tests "cn.x.ac.kteasy.server.schema.TypeConvertIT"
+            --tests "cn.x.ac.kteasy.server.schema.TypeConvertIT" \
+            --tests "cn.x.ac.kteasy.server.query.EqlQueryIT" \
+            --tests "cn.x.ac.kteasy.server.query.QueryExitUniquenessIT"

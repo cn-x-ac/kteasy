@@ -144,6 +144,17 @@ class SqlRendererTest {
     }
 
     @Test
+    fun `ext 空值走键存在性两库同构 真列空值走 IS NULL`() {
+        // = null → NOT 键存在（规避 §E35 的 JSON null 两库分叉）；!= null → 键存在。
+        val eqNull = render(pg, "from customer where amount = null")
+        assertThat(eqNull.sql).contains("NOT (t0.ext #> '{amount}' IS NOT NULL)")
+        val neNull = render(my, "from customer where amount != null")
+        assertThat(neNull.sql).contains("JSON_CONTAINS_PATH")
+        // 软删 deleted_at 是真列 → 直译 IS NULL。
+        assertThat(render(pg, "from customer").sql).contains("t0.deleted_at IS NULL")
+    }
+
+    @Test
     fun `聚合与空值恒末排序`() {
         val agg = render(pg, "select count(*) from customer")
         assertThat(agg.sql).contains("SELECT COUNT(*)")

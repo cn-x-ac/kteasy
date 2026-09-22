@@ -138,7 +138,17 @@ class SqlRenderer(
             is RExpr.And -> e.parts.joinToString(" AND ") { "(${renderExpr(it)})" }
             is RExpr.Or -> e.parts.joinToString(" OR ") { "(${renderExpr(it)})" }
             is RExpr.Not -> "NOT (${renderExpr(e.inner)})"
-            is RExpr.IsNull -> "${locExpr(e.location)} ${if (e.negated) "IS NOT NULL" else "IS NULL"}"
+            is RExpr.IsNull ->
+                when (val loc = e.location) {
+                    // ext 字段统一「键存在性」语义（null ≡ 键不存在）：直译 IS NULL 会因 JSON null 两库分叉（§E35）。
+                    // 键存在性谓词两库同构；json null 值视为已设置，由 M1-06 写通道归一为键缺失（证据 §2）。
+                    is ValueLocation.Ext -> {
+                        val f = provider.json.predicateExists("${loc.alias}.${SystemColumns.EXT}", loc.key)
+                        if (e.negated) f.sql else "NOT ${f.sql}"
+                    }
+
+                    is ValueLocation.Column -> "${loc.alias}.${loc.column} ${if (e.negated) "IS NOT NULL" else "IS NULL"}"
+                }
             is RExpr.Cmp -> renderCmp(e)
             is RExpr.In -> renderIn(e)
             is RExpr.Like -> renderLike(e)
@@ -257,10 +267,22 @@ class SqlRenderer(
         return key
     }
 
+    /**
+     * 日期窗绑定值：DATE → LocalDate；TIMESTAMP → **UTC 裸墙钟串**（无时区后缀）。
+     *
+     * 存储约定「存 UTC」（图纸 03 §3）：MySQL DATETIME 本就无时区、按墙钟比较；PG timestamptz 按会话时区解释
+     * 裸串——会话时区须为 UTC（CI 容器默认；写入通道 M1-06 承接同一约定）。这是 M1-04 §S8「typed 跨库不等价」
+     * 的查询侧落法：两库都以「UTC 墙钟」为唯一比较轴。
+     */
     private fun boundInstant(
         z: ZonedDateTime,
         isDate: Boolean,
-    ): Any = if (isDate) LocalDate.of(z.year, z.monthValue, z.dayOfMonth) else z.withZoneSameInstant(ZoneOffset.UTC)
+    ): Any =
+        if (isDate) {
+            LocalDate.of(z.year, z.monthValue, z.dayOfMonth)
+        } else {
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(z.withZoneSameInstant(ZoneOffset.UTC))
+        }
 
     private fun opSym(
         op: CmpOp,

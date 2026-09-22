@@ -7,7 +7,7 @@
 #   - Gradle wrapper 固定 8.14.5（见 gradle/wrapper/gradle-wrapper.properties）
 # ---------------------------------------------------------------------------
 [versions]
-kotlin = "2.3.21"
+kotlin = "2.4.20"
 springBoot = "4.1.1"
 # 合规骨架：spotless 强制【规格】§1.4 版权头 + ktlint 统一 Kotlin 风格
 spotless = "8.10.2"

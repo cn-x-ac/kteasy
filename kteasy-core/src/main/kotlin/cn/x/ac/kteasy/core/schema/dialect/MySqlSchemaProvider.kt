@@ -47,6 +47,8 @@ class MySqlSchemaProvider : SchemaProvider {
 
     override val fullText: FullText = MyFullText
 
+    override val date: DateOps = MyDateOps
+
     override fun capabilities(): Set<Capability> =
         setOf(
             Capability.JSON_MULTI_VALUED_INDEX,
@@ -396,5 +398,20 @@ internal fun ValueCast.toMySqlColumnType(): String =
         ValueCast.DATE -> "DATE"
         ValueCast.TIMESTAMP -> "DATETIME(6)"
     }
+
+/** MySQL 日期分量提取（WEEKDAY 周一=0 → +1 对齐 ISO 周一=1）。 */
+private object MyDateOps : DateOps {
+    override fun dayOfWeek(
+        expr: String,
+    ): Fragment = Fragment("(WEEKDAY($expr) + 1)")
+
+    override fun dayOfMonth(
+        expr: String,
+    ): Fragment = Fragment("DAYOFMONTH($expr)")
+
+    override fun monthOfYear(
+        expr: String,
+    ): Fragment = Fragment("MONTH($expr)")
+}
 
 private const val MY_MULTI_VAL_LEN = 255

@@ -306,6 +306,33 @@ interface FullText {
 }
 
 /**
+ * 日期分量提取的方言封装（M1-05 EQL 循环日期 token 用：每周N/每月N号/每年N月）。
+ *
+ * ⟨为何存在⟩：图纸 03 §3 的 `everywed/everymonth/everymay` 是**跨周期循环谓词**（按星期几/日/月命中），
+ * 无法展开成 `[from,to)` 时间窗，且各库日期分量函数写法不同（红线⑤禁止业务层分支）——故把「取分量」圈进此口。
+ * 入参 [expr] 为**已限定、无绑定参数**的取值表达式（真列名或 [JsonOps.extractTyped] 产物的 `.sql`；
+ * 二者均不含用户值参数），返回**同样无参**的整数表达式片段。
+ *
+ * 星期统一为 **ISO 序（周一=1…周日=7）**，与 `java.time.DayOfWeek.value` 对齐，供 EQL 编译器与内存 oracle 同序比较。
+ */
+interface DateOps {
+    /** ISO 星期几 1..7。PG `EXTRACT(ISODOW FROM (expr))`；MySQL `WEEKDAY(expr)+1`。 */
+    fun dayOfWeek(
+        expr: String,
+    ): Fragment
+
+    /** 月内日 1..31。PG `EXTRACT(DAY ...)`；MySQL `DAYOFMONTH(expr)`。 */
+    fun dayOfMonth(
+        expr: String,
+    ): Fragment
+
+    /** 年内月 1..12。PG `EXTRACT(MONTH ...)`；MySQL `MONTH(expr)`。 */
+    fun monthOfYear(
+        expr: String,
+    ): Fragment
+}
+
+/**
  * 聚合口：业务层唯一注入的方言扩展点。启动时按 `kteasy.db.dialect` 选 pg/mysql 实现（`KteasyKernelConfig`），
  * capability 快照灌进 [cn.x.ac.kteasy.core.kernel.KteasyContext.capabilities] 与健康端点。
  */
@@ -321,6 +348,7 @@ interface SchemaProvider {
     val lockingRead: LockingReadOps
     val ddlTx: DdlTx
     val fullText: FullText
+    val date: DateOps
 
     /** 本方言「原生支持」的能力集（进 health 快照，保持扁平字符串语义）。 */
     fun capabilities(): Set<Capability>

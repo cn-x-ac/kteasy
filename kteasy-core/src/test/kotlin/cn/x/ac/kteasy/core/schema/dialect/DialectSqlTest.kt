@@ -47,6 +47,22 @@ class DialectSqlTest {
 
     // ---------- JsonOps ----------
 
+    // ---------- DateOps（M1-05 EQL 循环日期 token） ----------
+
+    @Test
+    fun `DateOps 星期几两库皆 ISO 周一序 且无参`() {
+        val dowPg = pg.date.dayOfWeek("born")
+        val dowMy = my.date.dayOfWeek("born")
+        assertThat(dowPg.sql).isEqualTo("EXTRACT(ISODOW FROM (born))::int")
+        assertThat(dowMy.sql).isEqualTo("(WEEKDAY(born) + 1)") // WEEKDAY 周一=0 → +1 = ISO 周一=1
+        assertThat(dowPg.params).isEmpty()
+        assertThat(dowMy.params).isEmpty()
+        assertThat(pg.date.dayOfMonth("born").sql).isEqualTo("EXTRACT(DAY FROM (born))::int")
+        assertThat(my.date.dayOfMonth("born").sql).isEqualTo("DAYOFMONTH(born)")
+        assertThat(pg.date.monthOfYear("born").sql).isEqualTo("EXTRACT(MONTH FROM (born))::int")
+        assertThat(my.date.monthOfYear("born").sql).isEqualTo("MONTH(born)")
+    }
+
     @Test
     fun `JsonOps 取值 PG 用 hash 箭头 MySQL 用 json 函数`() {
         val path = JsonPath.of("amount")

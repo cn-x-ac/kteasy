@@ -45,6 +45,8 @@ class PostgresSchemaProvider : SchemaProvider {
 
     override val fullText: FullText = PgFullText
 
+    override val date: DateOps = PgDateOps
+
     override fun capabilities(): Set<Capability> =
         setOf(
             Capability.JSON_GIN_INDEX,
@@ -410,6 +412,20 @@ internal fun ValueCast.toPgType(): String =
         ValueCast.DATE -> "date"
         ValueCast.TIMESTAMP -> "timestamptz"
     }
+
+private object PgDateOps : DateOps {
+    override fun dayOfWeek(
+        expr: String,
+    ): Fragment = Fragment("EXTRACT(ISODOW FROM ($expr))::int")
+
+    override fun dayOfMonth(
+        expr: String,
+    ): Fragment = Fragment("EXTRACT(DAY FROM ($expr))::int")
+
+    override fun monthOfYear(
+        expr: String,
+    ): Fragment = Fragment("EXTRACT(MONTH FROM ($expr))::int")
+}
 
 /** 最小 JSON 字符串转义（够标识符与常见标量用；不含代理对精细处理）。 */
 internal fun jsonQuote(s: String): String {

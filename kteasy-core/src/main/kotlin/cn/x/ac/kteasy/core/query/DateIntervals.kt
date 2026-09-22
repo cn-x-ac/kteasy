@@ -25,7 +25,7 @@ import java.time.temporal.IsoFields
  * 日期条件族的**唯一语义源**（图纸 03 §3；块3）。区间类 token 在此展开为半开 `[from,to)`（本地时区 [now] 锚定、
  * 上层按字段类型转 UTC 存/绑）；循环类 token（every*）展开为 [DateResolution.Recurrence]，由块4 经 [DateOps] 渲染。
  *
- * ⟨可逆·语义待与 rebuild 现网核对，见证据 §2⟩：本文件是编译器与块5 内存 oracle 的**共同参照**——两执行路径
+ * ⟨可逆·语义待与参照产品现网核对，见证据 §2⟩：本文件是编译器与块5 内存 oracle 的**共同参照**——两执行路径
  * （SQL 区间参数 vs 内存逐条判定）共用同一 resolver，故一致性测证的是「参数化/时区/粒度落库正确」，非对外部日历真值。
  * 具体档位语义（LAST 是否含今天、周一起算、月末钳制、ago/after 单格、exact 以本刻为锚）按下方 KDoc 定义为单一确定解。
  */

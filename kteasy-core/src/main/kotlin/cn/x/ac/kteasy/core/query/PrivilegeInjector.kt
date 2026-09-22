@@ -54,7 +54,7 @@ class PassthroughPrivilegeInjector : PrivilegeInjector {
 }
 
 /**
- * `queryNoFilter` 白名单调用点（kernel 内免权限过滤的内部通道）。**枚举即清单**——persist4j 教训的 SPI 化：
+ * `queryNoFilter` 白名单调用点（kernel 内免权限过滤的内部通道）。**枚举即清单**——参照实现的白名单教训之 SPI 化：
  * 新增绕过点必须显式加枚举 + 过 [NoFilterWhitelist] 白名单评审，否则 [cn.x.ac.kteasy.core.query.EqlErrors.injectForbidden]。
  */
 enum class NoFilterCallSite {

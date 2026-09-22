@@ -111,12 +111,12 @@ sealed interface RExpr {
         val term: String,
     ) : RExpr
 
-    /** JSON key 存在性（ext 路径 `#>` IS NOT NULL / JSON_CONTAINS_PATH）。 */
+    /** JSON key 存在性（方言键存在性谓词，两库各自成型——勿在此复述方言函数名，字面量门禁扫整行文本）。 */
     data class HasKey(
         val ext: ValueLocation.Ext,
     ) : RExpr
 
-    /** 数组型 `has(arr, value)`：块4 走 `JsonOps.arrayContains`（PG GIN 包含 / MySQL 多值索引 MEMBER OF）。 */
+    /** 数组型 `has(arr, value)`：块4 走 JsonOps.arrayContains（含值判定，两库各自承载）。 */
     data class ArrayMember(
         val ext: ValueLocation.Ext,
         val value: Literal,

@@ -135,10 +135,19 @@ class SqlRenderer(
         e: RExpr,
     ): String =
         when (e) {
-            is RExpr.And -> e.parts.joinToString(" AND ") { "(${renderExpr(it)})" }
-            is RExpr.Or -> e.parts.joinToString(" OR ") { "(${renderExpr(it)})" }
-            is RExpr.Not -> "NOT (${renderExpr(e.inner)})"
-            is RExpr.IsNull ->
+            is RExpr.And -> {
+                e.parts.joinToString(" AND ") { "(${renderExpr(it)})" }
+            }
+
+            is RExpr.Or -> {
+                e.parts.joinToString(" OR ") { "(${renderExpr(it)})" }
+            }
+
+            is RExpr.Not -> {
+                "NOT (${renderExpr(e.inner)})"
+            }
+
+            is RExpr.IsNull -> {
                 when (val loc = e.location) {
                     // ext 字段统一「键存在性」语义（null ≡ 键不存在）：直译 IS NULL 会因 JSON null 两库分叉（§E35）。
                     // 键存在性谓词两库同构；json null 值视为已设置，由 M1-06 写通道归一为键缺失（证据 §2）。
@@ -147,16 +156,43 @@ class SqlRenderer(
                         if (e.negated) f.sql else "NOT ${f.sql}"
                     }
 
-                    is ValueLocation.Column -> "${loc.alias}.${loc.column} ${if (e.negated) "IS NOT NULL" else "IS NULL"}"
+                    is ValueLocation.Column -> {
+                        "${loc.alias}.${loc.column} ${if (e.negated) "IS NOT NULL" else "IS NULL"}"
+                    }
                 }
-            is RExpr.Cmp -> renderCmp(e)
-            is RExpr.In -> renderIn(e)
-            is RExpr.Like -> renderLike(e)
-            is RExpr.Match -> renderMatch(e)
-            is RExpr.HasKey -> provider.json.predicateExists("${e.ext.alias}.${SystemColumns.EXT}", e.ext.key).sql
-            is RExpr.ArrayMember -> renderArrayMember(e)
-            is RExpr.Within -> renderWithin(e)
-            is RExpr.N2n -> renderN2n(e)
+            }
+
+            is RExpr.Cmp -> {
+                renderCmp(e)
+            }
+
+            is RExpr.In -> {
+                renderIn(e)
+            }
+
+            is RExpr.Like -> {
+                renderLike(e)
+            }
+
+            is RExpr.Match -> {
+                renderMatch(e)
+            }
+
+            is RExpr.HasKey -> {
+                provider.json.predicateExists("${e.ext.alias}.${SystemColumns.EXT}", e.ext.key).sql
+            }
+
+            is RExpr.ArrayMember -> {
+                renderArrayMember(e)
+            }
+
+            is RExpr.Within -> {
+                renderWithin(e)
+            }
+
+            is RExpr.N2n -> {
+                renderN2n(e)
+            }
         }
 
     private fun renderCmp(
@@ -281,7 +317,9 @@ class SqlRenderer(
         if (isDate) {
             LocalDate.of(z.year, z.monthValue, z.dayOfMonth)
         } else {
-            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(z.withZoneSameInstant(ZoneOffset.UTC))
+            java.time.format.DateTimeFormatter
+                .ofPattern("yyyy-MM-dd HH:mm:ss")
+                .format(z.withZoneSameInstant(ZoneOffset.UTC))
         }
 
     private fun opSym(

@@ -221,7 +221,8 @@ class WritePipelineTest {
         val row = WriteRow("R1", 3, values = mapOf("code" to DraftValue.Text("C-1"), "name" to DraftValue.Text("甲")))
         val same = plan(WriteInput(g, ctxOf(recordId = "R1"), RecordDraft.of("code" to DraftValue.Text("C-1"), "name" to DraftValue.Text("乙")), row))
         assertEquals(setOf("name"), same.diff.keys, "整单回传不可改字段不该报错、也不该进 diff")
-        assertFalse("code" in same.extValues)
+        // ext 是整列覆盖写，所以未触碰的 code 旧值仍须原样带回去（缺了它就会被抹成 null）
+        assertEquals(DraftValue.Text("C-1"), same.extValues["code"])
         val changed = rejected(WriteInput(g, ctxOf(recordId = "R1"), RecordDraft.of("code" to DraftValue.Text("C-2")), row))
         assertEquals(ApiError.BUSINESS_RULE, changed.apiError)
     }

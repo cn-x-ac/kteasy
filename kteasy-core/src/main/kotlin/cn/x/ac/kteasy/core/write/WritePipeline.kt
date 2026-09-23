@@ -199,6 +199,16 @@ class WritePipeline(
             }
         columns["row_version"] = next
 
+        // ext is whole-column overwrite, so untouched legacy keys must be merged in first --
+        // otherwise one PATCH erases every other field living in that column.
+        val extStorage =
+            input.graph.fields
+                .filter { it.storageKind == StorageKind.EXT }
+                .map { it.apiName }
+                .toSet()
+        input.existing?.values?.forEach { (api, old) ->
+            if (api in extStorage && !derived.containsKey(api) && old !is DraftValue.Cleared) ext[api] = old
+        }
         for (f in input.graph.fields) {
             val v = derived[f.apiName] ?: continue
             if (f.storageKind == StorageKind.EXT) {

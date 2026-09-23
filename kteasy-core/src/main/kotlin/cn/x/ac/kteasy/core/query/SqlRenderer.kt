@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 package cn.x.ac.kteasy.core.query
-
+import cn.x.ac.kteasy.core.kernel.WallClock
 import cn.x.ac.kteasy.core.meta.LogicalType
 import cn.x.ac.kteasy.core.meta.SystemColumns
 import cn.x.ac.kteasy.core.schema.dialect.Fragment
@@ -313,14 +313,7 @@ class SqlRenderer(
     private fun boundInstant(
         z: ZonedDateTime,
         isDate: Boolean,
-    ): Any =
-        if (isDate) {
-            LocalDate.of(z.year, z.monthValue, z.dayOfMonth)
-        } else {
-            java.time.format.DateTimeFormatter
-                .ofPattern("yyyy-MM-dd HH:mm:ss")
-                .format(z.withZoneSameInstant(ZoneOffset.UTC))
-        }
+    ): Any = WallClock.bind(z, isDate)
 
     private fun opSym(
         op: CmpOp,

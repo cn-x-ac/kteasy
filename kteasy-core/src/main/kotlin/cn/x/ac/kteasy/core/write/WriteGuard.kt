@@ -22,6 +22,7 @@ package cn.x.ac.kteasy.core.write
  * 查询侧的 `queryNoFilter` 之所以需要白名单，是因为仪表盘/recalc 有合法的免过滤读；
  * 写入侧不存在「免权限写」——特权通道靠 [WriteSource.SYSTEM] 表达、由守卫实现自行裁决，
  * 因此这里没有 `writeNoGuard`，也就没有可被悄悄放宽的口子（卡面「出口唯一」的写侧落点）。
+ * 守卫类拒绝只有一个符号名 `WRITE_FORBIDDEN`（P5）——差异进 message，不设第二个拒绝出口。
  */
 interface WriteGuard {
     /**

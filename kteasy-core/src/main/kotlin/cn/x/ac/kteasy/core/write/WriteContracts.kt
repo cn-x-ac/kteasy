@@ -27,8 +27,8 @@ import java.time.ZonedDateTime
 /**
  * 写入来源（卡面 ctx 的"来源枚举"）。审计与守卫按来源差异化判定的唯一依据。
  *
- * 卡面写的是 `INTERNAL`、图纸 04 阶段 2 写的是 `SYSTEM`，同一个意思两个名字（⟨可逆⟩代拍 D4：
- * 取图纸 04 的 [SYSTEM]，覆盖引擎内部回写、recalc、自动化下发等特权通道）。
+ * 词汇统一为 `SYSTEM`（P5，2026-09-23）：覆盖引擎内部回写、recalc、自动化下发等特权通道。
+ * 不留 `INTERNAL` 别名——同义两值迟早漂移，而 M2/M3/M4/M5 每张卡都要在 `when` 里写这个名字。
  */
 enum class WriteSource {
     /** 用户在界面上保存（受完整前端语义约束，但服务端**一律重判**，不信任前端）。 */
@@ -116,8 +116,10 @@ data class WriteActor(
  *
  * @property now 注入时钟（与 [cn.x.ac.kteasy.core.query.QueryContext.now] 同形，保证双库 oracle 可复现）
  * @property recordId 既有行 id；UPSERT 时它的有无直接决定新建还是更新
- * @property expectedVersion 乐观并发的客户端版本（图纸 04 阶段 9 的 `row_version`）；
- *   null＝不强校验（同记录写锁仍会串行化，见卡面 §5）
+ * @property expectedVersion 乐观并发的客户端版本（承载列＝`row_version`）。P1 定稿：
+ *   带了就双条件更新、不匹配出 420 `CONFLICT_RETRY`；不带则照常写入并出 warning
+ *   `OVERRIDE_WITHOUT_VERSION`——不丢改动本就由「每记录命名锁 + 事务内读最新行算 diff」保证，
+ *   版本号管的是「拿过期表单盲覆盖」这件事。
  */
 data class WriteContext(
     val objectApi: String,
@@ -192,16 +194,16 @@ data class FieldDiff(
  * 写入结果（卡面 §1：`{id, version, warnings[]}`）。
  *
  * @property version 提交后的 `row_version`，供调用方下次带 [WriteContext.expectedVersion]
- * @property warnings 非致命告知（如「字段已停用，值保留在 ext 未清理」）。
- *   字符串承载、以 `CODE:detail` 约定命名（⟨可逆⟩代拍 D5：卡面写 warnings[]，未定元素形状，
- *   先不上类型，等 M5 审计/前端提示真有需要再扩）。
+ * @property warnings 非致命告知（如未带版本却覆盖了当前值）。形状按 P6 定为类型化
+ *   [WriteWarning]（`{code, field?, msg}`，与 420 的 `data.fields[]` 同一套词汇）——
+ *   裸串 `CODE:detail` 日后要被 M5 审计与前端分派，届时改形状是破坏性的。
  */
 data class WriteResult(
     val id: String,
     val version: Long,
     val kind: WriteKind,
     val diff: Map<String, FieldDiff> = emptyMap(),
-    val warnings: List<String> = emptyList(),
+    val warnings: List<WriteWarning> = emptyList(),
 )
 
 /**

@@ -42,14 +42,25 @@ object WriteErrors {
     const val ID_FIELD_READONLY = "FIELD_READONLY"
     const val ID_SYSTEM_COLUMN_READONLY = "SYSTEM_COLUMN_READONLY"
     const val ID_EXT_UNKNOWN_KEY = "EXT_UNKNOWN_KEY"
+
+    /** 字段存在但已停用（`enabled=false`）仍被写（P3：与未注册键同档，但回显信息不同）。 */
+    const val ID_FIELD_DISABLED = "FIELD_DISABLED"
     const val ID_OBJECT_DISABLED = "OBJECT_DISABLED"
     const val ID_CONFLICT_RETRY = "CONFLICT_RETRY"
     const val ID_LOCK_RETRY = "LOCK_RETRY"
     const val ID_FK_VIOLATION = "FK_VIOLATION"
     const val ID_IN_USE = "IN_USE"
-    const val ID_BATCH_SOURCE_FORBIDDEN = "BATCH_SOURCE_FORBIDDEN"
 
-    /** 全部已登记符号名（M1-06 清单；新增须同步图纸 04 与 API 总表）。 */
+    /** 编号取号失败（**M1-07 预留**：本卡只登记符号名与承载档，不产出）。 */
+    const val ID_AUTONUM_FAILED = "AUTONUM_FAILED"
+
+    /** 自动化同步钩子（数据校验/自动审批）拒绝（**M3 预留**：钩子不得另造形状，见图纸 07）。 */
+    const val ID_AUTOMATION_REJECTED = "AUTOMATION_REJECTED"
+
+    /**
+     * 全部已登记符号名。**新增须同步图纸 04 与 API 总表**，且单测按精确集合相等锁死
+     * （只断「无重复」等于没锁——新码会悄悄漂出去）。含 M1-07/M3 两个预留位。
+     */
     val ALL_IDS: List<String> =
         listOf(
             ID_NOT_FOUND,
@@ -65,7 +76,9 @@ object WriteErrors {
             ID_LOCK_RETRY,
             ID_FK_VIOLATION,
             ID_IN_USE,
-            ID_BATCH_SOURCE_FORBIDDEN,
+            ID_FIELD_DISABLED,
+            ID_AUTONUM_FAILED,
+            ID_AUTOMATION_REJECTED,
         )
 
     /**
@@ -88,6 +101,7 @@ object WriteErrors {
             ID_FIELD_REQUIRED,
             ID_OPTION_DOMAIN,
             ID_EXT_UNKNOWN_KEY,
+            ID_FIELD_DISABLED,
         )
 
     /** 由符号名派生承载码的**唯一**入口（阶段 3/4 一律走这里，禁在调用点手选 [ApiError]）。 */
@@ -135,22 +149,16 @@ object WriteErrors {
             mapOf("object" to objectApi, "record_id" to recordId),
         )
 
-    /** 守卫拒绝（阶段 2；M2-02 真权限后走这条），HTTP 403 / code 403。 */
+    /**
+     * 守卫拒绝（阶段 2；M2-02 真权限后走这条），HTTP 403 / code 403。
+     *
+     * **守卫类拒绝只有一个符号名**（P5）：`writeAllInTx` 的来源闸门、层级/条件权限、字段权限都经此出口，
+     * 差异写进 [reason] 与 [extra]——否则守卫会长出第二个拒绝入口，「出口唯一」反被稀释。
+     */
     fun forbidden(
         reason: String,
         extra: Map<String, Any?> = emptyMap(),
     ): KnownKteasyException = single(ApiError.FORBIDDEN, ID_FORBIDDEN, "写入被拒绝：$reason", extra)
-
-    /** `writeAllInTx` 被非特权来源调用（卡面 §6），HTTP 403 / code 403。 */
-    fun batchSourceForbidden(
-        source: String,
-    ): KnownKteasyException =
-        single(
-            ApiError.FORBIDDEN,
-            ID_BATCH_SOURCE_FORBIDDEN,
-            "同事务批量写 internal API 仅 SYSTEM/TRANSFORM/IMPORT 可用，当前来源 [$source]",
-            mapOf("source" to source),
-        )
 
     /** 对象停用/归档仍被写（阶段 1/4 的治理位），HTTP 409 / code 420。 */
     fun objectDisabled(

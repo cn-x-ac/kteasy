@@ -135,6 +135,37 @@ class WriteContractTest {
 
     // ---------- 错误契约（代拍 D1 的落点） ----------
 
+    /**
+     * 符号名清单**按精确集合相等**锁死：只断「无重复」等于没锁——新增码会悄悄漂出去，
+     * 而这张清单要进 API 总表与图纸 04，是公开契约（含 M1-07/M3 两个预留位）。
+     */
+    @Test
+    fun `符号名清单按精确相等冻结`() {
+        assertEquals(
+            setOf(
+                "WRITE_NOT_FOUND",
+                "WRITE_FORBIDDEN",
+                "FIELD_TYPE",
+                "FIELD_REQUIRED",
+                "OPTION_DOMAIN",
+                "FIELD_READONLY",
+                "SYSTEM_COLUMN_READONLY",
+                "EXT_UNKNOWN_KEY",
+                "FIELD_DISABLED",
+                "OBJECT_DISABLED",
+                "CONFLICT_RETRY",
+                "LOCK_RETRY",
+                "FK_VIOLATION",
+                "IN_USE",
+                "AUTONUM_FAILED",
+                "AUTOMATION_REJECTED",
+            ),
+            WriteErrors.ALL_IDS.toSet(),
+            "新增/删除符号名必须同步图纸 04、API 总表与本断言",
+        )
+        assertEquals(ApiError.FORBIDDEN, WriteErrors.forbidden("x").apiError)
+    }
+
     @Test
     fun `符号名清单冻结且格式统一`() {
         val ids = WriteErrors.ALL_IDS
@@ -165,11 +196,12 @@ class WriteContractTest {
                 WriteErrors.ID_FIELD_REQUIRED,
                 WriteErrors.ID_OPTION_DOMAIN,
                 WriteErrors.ID_EXT_UNKNOWN_KEY,
+                WriteErrors.ID_FIELD_DISABLED,
             )
         loadFixable.forEach { id ->
             assertEquals(ApiError.INVALID_PARAM, WriteErrors.violation("f", id, "x").contract, "$id 属改载荷可自救")
         }
-        (WriteErrors.ALL_IDS - WriteErrors.LOAD_FIXABLE_IDS - setOf(WriteErrors.ID_NOT_FOUND, WriteErrors.ID_FORBIDDEN, WriteErrors.ID_BATCH_SOURCE_FORBIDDEN)).forEach { id ->
+        (WriteErrors.ALL_IDS - WriteErrors.LOAD_FIXABLE_IDS - setOf(WriteErrors.ID_NOT_FOUND, WriteErrors.ID_FORBIDDEN)).forEach { id ->
             assertEquals(ApiError.BUSINESS_RULE, WriteErrors.violation("f", id, "x").contract, "$id 属现场状态类")
         }
         // 判据表本身不得漂出未登记符号名
@@ -220,5 +252,34 @@ class WriteContractTest {
         // 缺省期望版本为 null＝不强校验；来源与意图必须由调用方显式带入，管道不自取
         assertEquals(null, ctx().expectedVersion)
         assertEquals(WriteSource.UI, ctx().source)
+    }
+
+    // ---------- 告警码（P6）与写锁键位 ----------
+
+    @Test
+    fun `告警码清单冻结且载荷形状稳定`() {
+        assertEquals(
+            setOf("OVERRIDE_WITHOUT_VERSION", "FIELD_DEPRECATED", "AUTONUM_SKIPPED"),
+            WriteWarnings.ALL_CODES.toSet(),
+            "新增告警码须同步图纸 04 与本断言",
+        )
+        val withField = WriteWarning(WriteWarnings.OVERRIDE_WITHOUT_VERSION, "name", "未带版本却覆盖了当前值").toWire()
+        assertEquals(listOf("code", "field", "msg"), withField.keys.toList(), "键序冻结")
+        val noField = WriteWarning(WriteWarnings.AUTONUM_SKIPPED, message = "导入不推进编号").toWire()
+        assertEquals(listOf("code", "msg"), noField.keys.toList(), "无字段时不写显式 null（与 M1-05 D9 的键存在性口径一致）")
+        assertFailsWith<IllegalArgumentException> { WriteWarning("NOT_REGISTERED", message = "x") }
+    }
+
+    @Test
+    fun `写锁键恒定不越 MySQL 锁名上限`() {
+        // 记录级锁 9+26+1+26=62；若按 api_name 拼最长可达 74，会被 LockKey 的 64 上限拦成运行期异常
+        val obj = "0".repeat(26)
+        val rec = "1".repeat(26)
+        val key = WriteLocks.of(obj, rec)
+        assertEquals(WriteLocks.RECORD_PREFIX + obj + ':' + rec, key.name)
+        assertEquals(62, key.name.length)
+        assertEquals(WriteLocks.of(obj, rec).id, key.id, "两库同一逻辑键须由同一锁名派生")
+        assertTrue(WriteLocks.ofObject(obj).name.length <= 64)
+        assertFalse(key.name.startsWith("KTEASY:SCHEMA:"), "记录写锁与元数据变更锁须不同命名空间")
     }
 }

@@ -17,6 +17,7 @@ package cn.x.ac.kteasy.server.md
 
 import cn.x.ac.kteasy.core.kernel.ApiError
 import cn.x.ac.kteasy.core.kernel.KnownKteasyException
+import cn.x.ac.kteasy.core.meta.FieldWritePolicy
 import cn.x.ac.kteasy.core.meta.LogicalType
 import cn.x.ac.kteasy.core.meta.MdDict
 import cn.x.ac.kteasy.core.meta.MdDictItem
@@ -25,6 +26,7 @@ import cn.x.ac.kteasy.core.meta.MdObject
 import cn.x.ac.kteasy.core.meta.MdOption
 import cn.x.ac.kteasy.core.meta.MdOptionSet
 import cn.x.ac.kteasy.core.meta.ObjectKind
+import cn.x.ac.kteasy.core.meta.RequiredScope
 import cn.x.ac.kteasy.core.meta.StorageKind
 import cn.x.ac.kteasy.core.schema.dialect.LogicalArea
 import cn.x.ac.kteasy.core.schema.dialect.SchemaProvider
@@ -93,6 +95,8 @@ class MetadataRepository(
                 optionSetId = rs.getString("option_set_id"),
                 seq = rs.getInt("seq"),
                 enabled = rs.getBoolean("enabled"),
+                writePolicy = FieldWritePolicy.valueOf(rs.getString("write_policy")),
+                requiredScope = RequiredScope.valueOf(rs.getString("required_scope")),
             )
         }
 
@@ -202,12 +206,12 @@ class MetadataRepository(
             INSERT INTO ${table("md_field")}
                 (id, object_id, api_name, label, logical_type, storage_kind, required,
                  default_json, validation_json, ui_json, ref_object_id, ref_any_objs_json,
-                 dict_id, option_set_id, seq, enabled)
+                 dict_id, option_set_id, seq, enabled, write_policy, required_scope)
             VALUES
                 (:id, :object_id, :api_name, :label, :logical_type, :storage_kind, :required,
                  ${jsonPh("default_json")}, ${jsonPh("validation_json")},
                  ${jsonPh("ui_json")}, :ref_object_id, ${jsonPh("ref_any_objs_json")},
-                 :dict_id, :option_set_id, :seq, :enabled)
+                 :dict_id, :option_set_id, :seq, :enabled, :write_policy, :required_scope)
             """.trimIndent(),
             MapSqlParameterSource()
                 .addValue("id", f.id)
@@ -225,7 +229,9 @@ class MetadataRepository(
                 .addValue("dict_id", f.dictId)
                 .addValue("option_set_id", f.optionSetId)
                 .addValue("seq", f.seq)
-                .addValue("enabled", f.enabled),
+                .addValue("enabled", f.enabled)
+                .addValue("write_policy", f.writePolicy.name)
+                .addValue("required_scope", f.requiredScope.name),
         )
     }
 
@@ -265,6 +271,8 @@ class MetadataRepository(
         uiJson: String?,
         seq: Int?,
         enabled: Boolean?,
+        writePolicy: FieldWritePolicy? = null,
+        requiredScope: RequiredScope? = null,
     ) {
         jdbc.update(
             """
@@ -275,7 +283,9 @@ class MetadataRepository(
                    validation_json = COALESCE(${jsonPh("validation_json")}, validation_json),
                    ui_json = COALESCE(${jsonPh("ui_json")}, ui_json),
                    seq = COALESCE(:seq, seq),
-                   enabled = COALESCE(:enabled, enabled)
+                   enabled = COALESCE(:enabled, enabled),
+                   write_policy = COALESCE(:write_policy, write_policy),
+                   required_scope = COALESCE(:required_scope, required_scope)
              WHERE id = :id
             """.trimIndent(),
             MapSqlParameterSource()
@@ -286,6 +296,8 @@ class MetadataRepository(
                 .addValue("ui_json", uiJson)
                 .addValue("seq", seq)
                 .addValue("enabled", enabled)
+                .addValue("write_policy", writePolicy?.name)
+                .addValue("required_scope", requiredScope?.name)
                 .addValue("id", id),
         )
     }

@@ -20,12 +20,14 @@ import cn.x.ac.kteasy.core.kernel.KnownKteasyException
 import cn.x.ac.kteasy.core.kernel.MetadataAction
 import cn.x.ac.kteasy.core.kernel.MetadataChangedEvent
 import cn.x.ac.kteasy.core.kernel.Ulid
+import cn.x.ac.kteasy.core.meta.FieldWritePolicy
 import cn.x.ac.kteasy.core.meta.LogicalType
 import cn.x.ac.kteasy.core.meta.MdField
 import cn.x.ac.kteasy.core.meta.MdObject
 import cn.x.ac.kteasy.core.meta.MetadataGraph
 import cn.x.ac.kteasy.core.meta.MetadataValidator
 import cn.x.ac.kteasy.core.meta.ObjectKind
+import cn.x.ac.kteasy.core.meta.RequiredScope
 import cn.x.ac.kteasy.core.meta.StorageKind
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
@@ -64,6 +66,13 @@ class MetadataService(
         val dictId: String? = null,
         val optionSetId: String? = null,
         val seq: Int = 0,
+        /**
+         * 写策略档位（M1-06）。与 [logicalType]/[storageKind] 同风格用字符串承载：
+         * 非法值在服务层统一折成 `violations` 契约体，不在控制器猜枚举名。null＝缺省 WRITABLE。
+         */
+        val writePolicy: String? = null,
+        /** 必填作用域（ALWAYS/CREATE/UPDATE），仅当 [required]=true 有意义。null＝缺省 ALWAYS。 */
+        val requiredScope: String? = null,
     )
 
     data class ObjectCreateCmd(
@@ -92,6 +101,8 @@ class MetadataService(
         val uiJson: String? = null,
         val seq: Int? = null,
         val enabled: Boolean? = null,
+        val writePolicy: String? = null,
+        val requiredScope: String? = null,
     )
 
     data class CopyCmd(
@@ -238,6 +249,8 @@ class MetadataService(
                     uiJson = cmd.uiJson ?: existing.uiJson,
                     seq = cmd.seq ?: existing.seq,
                     enabled = cmd.enabled ?: existing.enabled,
+                    writePolicy = cmd.writePolicy?.let { parseWritePolicy(fieldApi, it) } ?: existing.writePolicy,
+                    requiredScope = cmd.requiredScope?.let { parseRequiredScope(fieldApi, it) } ?: existing.requiredScope,
                 )
             throwOnViolations(MetadataValidator.checkField(merged))
             repository.updateFieldEditable(
@@ -249,6 +262,8 @@ class MetadataService(
                 uiJson = cmd.uiJson,
                 seq = cmd.seq,
                 enabled = cmd.enabled,
+                writePolicy = if (cmd.writePolicy != null) merged.writePolicy else null,
+                requiredScope = if (cmd.requiredScope != null) merged.requiredScope else null,
             )
             repository.findFieldByApi(obj.id, fieldApi)!!
         }
@@ -345,6 +360,8 @@ class MetadataService(
                     throw badRequest(listOf("字段 [${cmd.apiName}] storage_kind [$it] 非法（EXT/COLUMN/N2N）"))
                 }
             } ?: type.storage
+        val policy = parseWritePolicy(cmd.apiName, cmd.writePolicy)
+        val scope = parseRequiredScope(cmd.apiName, cmd.requiredScope)
         val refObjectId =
             cmd.refObjectApi?.let { api ->
                 repository.findObjectByApi(api)?.id
@@ -367,6 +384,8 @@ class MetadataService(
                 dictId = cmd.dictId,
                 optionSetId = cmd.optionSetId,
                 seq = cmd.seq,
+                writePolicy = policy,
+                requiredScope = scope,
             )
         if (fields.any { it.id != field.id && it.apiName == field.apiName }) {
             throw badRequest(listOf("字段 [${field.apiName}] 在对象内重复"))
@@ -375,6 +394,33 @@ class MetadataService(
     }
 
     private fun requireObject(api: String): MdObject = repository.findObjectByApi(api) ?: throw notFound("对象 [$api] 不存在")
+
+    /**
+     * 写策略档位解析（M1-06）：null＝缺省 [FieldWritePolicy.WRITABLE]。
+     * 非法值折成 violations（与 logical_type/storage_kind 同口径），不让控制器自行猜枚举名。
+     */
+    private fun parseWritePolicy(
+        fieldApi: String,
+        raw: String?,
+    ): FieldWritePolicy =
+        raw?.let {
+            runCatching { FieldWritePolicy.valueOf(it.uppercase()) }.getOrElse {
+                throw badRequest(
+                    listOf("字段 [$fieldApi] write_policy [$raw] 非法（WRITABLE/NO_CREATE/NO_UPDATE/READONLY/DERIVED）"),
+                )
+            }
+        } ?: FieldWritePolicy.WRITABLE
+
+    /** 必填作用域解析（M1-06）：null＝缺省 [RequiredScope.ALWAYS]；仅当 required=true 有实际效果。 */
+    private fun parseRequiredScope(
+        fieldApi: String,
+        raw: String?,
+    ): RequiredScope =
+        raw?.let {
+            runCatching { RequiredScope.valueOf(it.uppercase()) }.getOrElse {
+                throw badRequest(listOf("字段 [$fieldApi] required_scope [$raw] 非法（ALWAYS/CREATE/UPDATE）"))
+            }
+        } ?: RequiredScope.ALWAYS
 
     private fun toJsonArray(items: List<String>): String? = if (items.isEmpty()) null else items.joinToString(",", "[", "]") { "\"${it}\"" }
 

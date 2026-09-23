@@ -183,6 +183,14 @@ object MetadataValidator {
                 Unit
             }
         }
+
+        // 写策略可达性（M1-06）：只读档位 + 必填 + 既无默认值又非自动编号＝任何来源都填不进却又必填，
+        // 属自相矛盾配置，治理面拒建——把"必填永远满足不了"这种坑挡在配置期，而不是留到写通道报 410。
+        if (field.writePolicy == FieldWritePolicy.READONLY || field.writePolicy == FieldWritePolicy.DERIVED) {
+            if (field.required && field.defaultJson.isNullOrBlank() && field.logicalType != LogicalType.AUTONUM) {
+                v += "$tag 写策略 ${field.writePolicy.name} 且必填，但无默认值/非自动编号：任何来源都填不进"
+            }
+        }
         return v
     }
 

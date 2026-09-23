@@ -262,6 +262,34 @@ class MetadataValidatorTest {
         assertTrue(v.any { it.contains("重复") && it.contains("name") }, v.toString())
     }
 
+    /**
+     * 写策略可达性（M1-06）：只读档位（元数据只读/自动化下发）+ 必填 + 无兜底 ＝ 任何来源都填不进却又必填，
+     * 配置期就该拒；有默认值、自动编号、或压根不必填都放行。NO_CREATE/NO_UPDATE 不在此列——它们各留了一条可写路径。
+     */
+    @Test
+    fun `写策略可达性 - 只读且必填且无兜底即拒`() {
+        val deadEnd = field("code", LogicalType.TEXT).copy(required = true, writePolicy = FieldWritePolicy.READONLY)
+        assertTrue(MetadataValidator.checkField(deadEnd).any { it.contains("填不进") }, "只读+必填+无默认应拒: $deadEnd")
+
+        val withDefault = deadEnd.copy(defaultJson = "\"x\"")
+        assertTrue(MetadataValidator.checkField(withDefault).isEmpty(), "有默认值应放行: ${MetadataValidator.checkField(withDefault)}")
+
+        val autonum = field("autonum_no", LogicalType.AUTONUM).copy(required = true, writePolicy = FieldWritePolicy.DERIVED)
+        assertTrue(MetadataValidator.checkField(autonum).isEmpty(), "自动编号由服务端派生，应放行: ${MetadataValidator.checkField(autonum)}")
+
+        val optionalReadonly = field("readonly_note", LogicalType.TEXT).copy(writePolicy = FieldWritePolicy.READONLY)
+        assertTrue(MetadataValidator.checkField(optionalReadonly).isEmpty())
+
+        listOf(FieldWritePolicy.NO_CREATE, FieldWritePolicy.NO_UPDATE).forEach { p ->
+            val f = field("t_${p.name.lowercase()}", LogicalType.TEXT).copy(required = true, writePolicy = p)
+            assertTrue(MetadataValidator.checkField(f).isEmpty(), "$p 仍有一条可写路径，应放行")
+        }
+
+        // requiredScope 与 required 正交：required=false 时作用域只是惰性配置，不触发任何拒绝
+        val scopeOnly = field("scope_only", LogicalType.TEXT).copy(requiredScope = RequiredScope.UPDATE)
+        assertTrue(MetadataValidator.checkField(scopeOnly).isEmpty())
+    }
+
     // ---------- parseStringArray ----------
 
     @Test

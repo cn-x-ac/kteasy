@@ -154,6 +154,8 @@ class MdGovernanceController(
                     uiJson = optionalText(body, "ui"),
                     seq = optionalInt(body, "seq"),
                     enabled = optionalBool(body, "enabled"),
+                    writePolicy = optionalText(body, "write_policy"),
+                    requiredScope = optionalText(body, "required_scope"),
                 ),
             ),
         )
@@ -223,6 +225,8 @@ class MdGovernanceController(
             dictId = optionalText(m, "dict_id"),
             optionSetId = optionalText(m, "option_set_id"),
             seq = optionalInt(m, "seq") ?: 0,
+            writePolicy = optionalText(m, "write_policy"),
+            requiredScope = optionalText(m, "required_scope"),
         )
 
     /** 把载荷里的 ref_any_objs（字符串数组或原始 JSON 串）规范成 JSON 数组串。 */

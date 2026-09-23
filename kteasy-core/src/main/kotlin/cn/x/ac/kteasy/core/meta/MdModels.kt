@@ -52,6 +52,8 @@ data class MdObject(
  * @property refAnyObjsJson ANYREF 允许对象 api_name 数组的原始 JSON 串
  * @property dictId 分类字典 id（DICT 必填）
  * @property optionSetId 选项集 id（PICKLIST/MULTISELECT/TAGS 必填）
+ * @property writePolicy 写策略档位（M1-06：禁新建/禁修改/元数据只读/自动化下发位）
+ * @property requiredScope 必填作用域（ALWAYS/CREATE/UPDATE），与 required 正交组合
  */
 data class MdField(
     val id: String,
@@ -70,6 +72,13 @@ data class MdField(
     val optionSetId: String? = null,
     val seq: Int = 0,
     val enabled: Boolean = true,
+    /**
+     * 写策略（M1-06 服务端硬只读的元数据位；缺省 [FieldWritePolicy.WRITABLE]）。
+     * 系统列的只读不在此表达——由写管道对 [SystemColumns] 恒定强制。
+     */
+    val writePolicy: FieldWritePolicy = FieldWritePolicy.WRITABLE,
+    /** 必填作用域，仅当 [required]=true 时有意义（M1-06 阶段 4「required 三态」）。 */
+    val requiredScope: RequiredScope = RequiredScope.ALWAYS,
 )
 
 /** 多级层级字典（树：[MdDictItem.path] 物化路径 `001/002`，层级 ≤4 ⟨可逆⟩）。 */

@@ -3,6 +3,8 @@
 -- 列集与 PG 版逻辑等价（json↔jsonb、DATETIME(6)↔timestamptz、TINYINT(1)↔boolean）。
 -- md_dep / md_autonum_rule 归 M1-07 建表；storage_kind 含 N2N（落 r_* 关联表，图纸 01 §2）。
 -- binary 规则：仅 id 及引用列钉 utf8mb4_bin；api_name/label/kind/path 等非标识符列吃表默认 utf8mb4_0900_ai_ci。
+-- M1-06 追加 md_field 两列：write_policy（服务端硬只读档位）、required_scope（必填作用域），
+-- 均非标识符列故吃库默认 collation；取值域由 CHECK 钉住（与 core.meta 两个枚举一字不差）。
 
 CREATE TABLE md_object (
     id                varchar(32)  COLLATE utf8mb4_bin NOT NULL,
@@ -40,11 +42,15 @@ CREATE TABLE md_field (
     option_set_id     varchar(32)  COLLATE utf8mb4_bin,
     seq               integer      NOT NULL DEFAULT 0,
     enabled           boolean      NOT NULL DEFAULT true,
+    write_policy      varchar(16)  NOT NULL DEFAULT 'WRITABLE',
+    required_scope    varchar(16)  NOT NULL DEFAULT 'ALWAYS',
     created_at        datetime(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at        datetime(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id),
     CONSTRAINT uk_md_field_object_api UNIQUE (object_id, api_name),
-    CONSTRAINT ck_md_field_storage CHECK (storage_kind IN ('EXT', 'COLUMN', 'N2N'))
+    CONSTRAINT ck_md_field_storage CHECK (storage_kind IN ('EXT', 'COLUMN', 'N2N')),
+    CONSTRAINT ck_md_field_write_policy CHECK (write_policy IN ('WRITABLE', 'NO_CREATE', 'NO_UPDATE', 'READONLY', 'DERIVED')),
+    CONSTRAINT ck_md_field_required_scope CHECK (required_scope IN ('ALWAYS', 'CREATE', 'UPDATE'))
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE INDEX ix_md_field_object ON md_field (object_id);

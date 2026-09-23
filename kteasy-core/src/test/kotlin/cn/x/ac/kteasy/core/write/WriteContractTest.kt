@@ -157,27 +157,33 @@ class WriteContractTest {
     }
 
     @Test
-    fun `聚合拒绝取最重承载码并保留全部明细`() {
-        val mixed =
-            WriteErrors.rejected(
-                listOf(
-                    WriteErrors.FieldViolation("phone", WriteErrors.ID_FIELD_TYPE, "格式不符", contract = ApiError.INVALID_PARAM),
-                    WriteErrors.FieldViolation("owner", WriteErrors.ID_SYSTEM_COLUMN_READONLY, "系统列不可写"),
-                ),
+    fun `承载码由符号名派生 改载荷可自救的一律 410`() {
+        // 判据（P2，适用面＝写通道）：改载荷能重发 → 410；得先改现场状态 → 420
+        val loadFixable =
+            listOf(
+                WriteErrors.ID_FIELD_TYPE,
+                WriteErrors.ID_FIELD_REQUIRED,
+                WriteErrors.ID_OPTION_DOMAIN,
+                WriteErrors.ID_EXT_UNKNOWN_KEY,
             )
-        assertEquals(ApiError.BUSINESS_RULE, mixed.apiError, "含 420 违规则整体走 420")
+        loadFixable.forEach { id ->
+            assertEquals(ApiError.INVALID_PARAM, WriteErrors.violation("f", id, "x").contract, "$id 属改载荷可自救")
+        }
+        (WriteErrors.ALL_IDS - WriteErrors.LOAD_FIXABLE_IDS - setOf(WriteErrors.ID_NOT_FOUND, WriteErrors.ID_FORBIDDEN, WriteErrors.ID_BATCH_SOURCE_FORBIDDEN)).forEach { id ->
+            assertEquals(ApiError.BUSINESS_RULE, WriteErrors.violation("f", id, "x").contract, "$id 属现场状态类")
+        }
+        // 判据表本身不得漂出未登记符号名
+        assertTrue(WriteErrors.LOAD_FIXABLE_IDS.all { it in WriteErrors.ALL_IDS }, "LOAD_FIXABLE_IDS 必须是已登记符号名的子集")
+        // 混合违规集整体走 420（现场状态优先），全部可自救才走 410；明细一项不丢、error_id 取首条
+        val mixed = WriteErrors.rejected(listOf(WriteErrors.violation("phone", WriteErrors.ID_FIELD_TYPE, "格式不符"), WriteErrors.violation("owner", WriteErrors.ID_SYSTEM_COLUMN_READONLY, "系统列不可写")))
+        assertEquals(ApiError.BUSINESS_RULE, mixed.apiError)
         val data = mixed.data as Map<*, *>
         val fields = data["fields"] as List<*>
         assertEquals(2, fields.size, "明细不得丢项")
         assertEquals(WriteErrors.ID_FIELD_TYPE, data["error_id"], "error_id 取首条违规")
-
-        val only410 =
-            WriteErrors.rejected(
-                listOf(WriteErrors.FieldViolation("nickname2", WriteErrors.ID_EXT_UNKNOWN_KEY, "未注册键", contract = ApiError.INVALID_PARAM)),
-            )
-        assertEquals(ApiError.INVALID_PARAM, only410.apiError, "卡面 GWT3：未知 ext key 出 410 并回显 key 名")
-        val d410 = only410.data as Map<*, *>
-        assertEquals("nickname2", (d410["fields"] as List<*>).let { (it.first() as Map<*, *>)["field"] })
+        assertEquals("phone", (fields.first() as Map<*, *>)["field"], "未注册键/违规字段名要能回显")
+        val allLoad = WriteErrors.rejected(listOf(WriteErrors.violation("phone", WriteErrors.ID_FIELD_TYPE, "格式不符"), WriteErrors.violation("stage", WriteErrors.ID_OPTION_DOMAIN, "不在候选")))
+        assertEquals(ApiError.INVALID_PARAM, allLoad.apiError)
     }
 
     @Test
@@ -202,7 +208,7 @@ class WriteContractTest {
         assertEquals(5L, cd["actual_version"])
 
         val lock = WriteErrors.lockRetry("KTEASY:W:OBJ1:01ABC", timeoutSeconds = 5)
-        assertEquals(ApiError.BUSINESS_RULE, lock.apiError, "卡面 §5 锁超时走 420，不占 429 节段（代拍 D6）")
+        assertEquals(ApiError.BUSINESS_RULE, lock.apiError, "现场状态类走 420（是否另立 429 承载位＝待决 P4）")
         assertEquals(WriteErrors.ID_LOCK_RETRY, (lock.data as Map<*, *>)["error_id"])
     }
 

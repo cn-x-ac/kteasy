@@ -69,6 +69,41 @@ object WriteErrors {
         )
 
     /**
+     * **承载码判据**（2026-09-23 用户裁决 P2，适用面＝写通道）：看「客户端改载荷能不能自救」。
+     *
+     * - 落在本集合里的符号名＝改载荷即可原样重发 → [ApiError.INVALID_PARAM]（410 / HTTP 400），
+     *   前端据此高亮到具体字段；
+     * - 不在本集合里的＝改载荷没用、得先改现场状态（值被别人改了、记录被引用、字段配置只读）
+     *   → [ApiError.BUSINESS_RULE]（420 / HTTP 409），前端据此给"刷新/重试"而不是让人白改。
+     *
+     * 判据写成"符号名 → 承载码"的派生表，是为了让阶段 3/4 的每个裁决点都不必自己选码——
+     * 选码的地方只有一处，下游卡（M3 校验、M4 转换、M5 导入）新增符号名时只需决定要不要进本表。
+     *
+     * 查询侧 `EQL_TYPE_MISMATCH` 走 420，是写通道之外的既有行为，不套用本判据（例外注记见
+     * `specs/evidence/M1-06.md` §2.0-P2 与图纸 04 §2）。
+     */
+    val LOAD_FIXABLE_IDS: Set<String> =
+        setOf(
+            ID_FIELD_TYPE,
+            ID_FIELD_REQUIRED,
+            ID_OPTION_DOMAIN,
+            ID_EXT_UNKNOWN_KEY,
+        )
+
+    /** 由符号名派生承载码的**唯一**入口（阶段 3/4 一律走这里，禁在调用点手选 [ApiError]）。 */
+    fun violation(
+        field: String,
+        errorId: String,
+        message: String,
+    ): FieldViolation =
+        FieldViolation(
+            field,
+            errorId,
+            message,
+            contract = if (errorId in LOAD_FIXABLE_IDS) ApiError.INVALID_PARAM else ApiError.BUSINESS_RULE,
+        )
+
+    /**
      * 单字段违规（阶段 3/4 的裁决产物）。
      *
      * @property field 字段 api_name（未注册键的拒绝场景＝那个野键名本身，卡面要求「回显 key 名」）

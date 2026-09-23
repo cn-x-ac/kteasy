@@ -56,7 +56,8 @@ class TraceIdFilter : OncePerRequestFilter() {
         }
     }
 
-    private companion object {
+    companion object {
+        /** 日志 MDC 键（响应头与写通道 traceId 同源，故对外可见）。 */
         const val MDC_KEY = "traceId"
         const val TRACE_HEADER = "X-Trace-Id"
     }

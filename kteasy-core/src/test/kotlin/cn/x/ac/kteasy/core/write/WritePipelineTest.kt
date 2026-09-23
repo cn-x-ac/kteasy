@@ -402,6 +402,44 @@ class WritePipelineTest {
         assertFalse("name_pinyin" in untouched.columnBindings, "值没变就不必重算检索码")
     }
 
+    /**
+     * ext 是整列覆盖写入：PATCH 一个字段时，未触碰的其他 ext 字段必须原样带回去。
+     *
+     * 块 3 实测踩过这个坑（管道只输出触碰键、装配层绑回整列，会把同列其他字段抹成 null），
+     * 所以这条不是锦上添花的用例，而是防止复发的唯一屏障。
+     */
+    @Test
+    fun `PATCH 单字段不得抹掉同一 ext 列里未触碰的字段`() {
+        val g = graphOf(field("name", LogicalType.TEXT), field("memo", LogicalType.TEXTAREA), field("phone", LogicalType.PHONE))
+        val row =
+            WriteRow(
+                "R1",
+                3,
+                values =
+                    mapOf(
+                        "name" to DraftValue.Text("甲"),
+                        "memo" to DraftValue.Text("留着"),
+                        "phone" to DraftValue.Text("13800001111"),
+                    ),
+            )
+        val p = plan(WriteInput(g, ctxOf(recordId = "R1", expectedVersion = 3), RecordDraft.of("name" to DraftValue.Text("乙")), row))
+        assertEquals(setOf("name"), p.diff.keys)
+        assertEquals(
+            mapOf(
+                "name" to DraftValue.Text("乙"),
+                "memo" to DraftValue.Text("留着"),
+                "phone" to DraftValue.Text("13800001111"),
+            ),
+            p.extValues,
+            "未触碰的 memo/phone 必须留在 ext 图里",
+        )
+        // 显式清空以 Cleared 形式进 ext 图（编码阶段据此删键），其余键照旧保留
+        val cleared = plan(WriteInput(g, ctxOf(recordId = "R1", expectedVersion = 3), RecordDraft.of("memo" to DraftValue.Cleared), row))
+        assertEquals(DraftValue.Cleared, cleared.extValues["memo"])
+        assertEquals(DraftValue.Text("甲"), cleared.extValues["name"])
+        assertEquals(DraftValue.Text("13800001111"), cleared.extValues["phone"])
+    }
+
     // ---------- 阶段 2 守卫接缝 ----------
 
     @Test

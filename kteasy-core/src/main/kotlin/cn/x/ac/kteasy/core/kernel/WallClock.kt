@@ -16,6 +16,7 @@
 package cn.x.ac.kteasy.core.kernel
 
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -43,6 +44,23 @@ object WallClock {
     fun date(
         z: ZonedDateTime,
     ): LocalDate = LocalDate.of(z.year, z.monthValue, z.dayOfMonth)
+
+    /**
+     * 写入侧的时间绑定值：UTC 日历时间、**不带偏移**。
+     *
+     * 为什么不能像查询侧那样绑裸墙钟串：PG 在**比较**语境下会把字面量串推断成 timestamp，
+     * 但 `INSERT`/`UPDATE` 的赋值位不会——它报「column is of type timestamp with time zone
+     * but expression is of type character varying」（MySQL 会隐式转，故只在 PG 侧暴露）。
+     * 绑 `LocalDateTime` 两库驱动都接受，且不做时区换算（会话时区为 UTC，见 [timestamp] 的说明）。
+     */
+    fun utcLocalDateTime(
+        z: ZonedDateTime,
+    ): LocalDateTime = z.withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime()
+
+    /** 写入侧的日期绑定值。 */
+    fun utcLocalDate(
+        z: ZonedDateTime,
+    ): LocalDate = date(z)
 
     /** JDBC 绑定值：isDate 决定两种形状之一。 */
     fun bind(

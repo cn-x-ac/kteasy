@@ -25,6 +25,7 @@ import cn.x.ac.kteasy.core.write.WriteGuard
 import cn.x.ac.kteasy.core.write.WritePipeline
 import cn.x.ac.kteasy.core.write.WriteSqlRenderer
 import cn.x.ac.kteasy.server.md.PinyinCodeGenerator
+import cn.x.ac.kteasy.server.write.WriteEventJournal
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -73,13 +74,20 @@ class WriteConfig {
  * M3 自动化、M5 审计各自注册新监听器，不改本类、更不改写通道。
  */
 @org.springframework.stereotype.Component
-class WriteCommittedListener {
+class WriteCommittedListener(
+    private val journal: WriteEventJournal,
+) {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    /**
+     * 先记账本再打日志：账本是卡面 GWT5（回滚即无事件）的断言对象，
+     * 挂在 AFTER_COMMIT 上就意味着回滚的事务永远进不来——这正是验收要证的点。
+     */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     fun onCommitted(
         event: WriteCommittedEvent,
     ) {
+        journal.record(event)
         log.info(
             "写提交 event={} trace={} object={} id={} kind={} source={} user={} 变更={}",
             event.eventId,

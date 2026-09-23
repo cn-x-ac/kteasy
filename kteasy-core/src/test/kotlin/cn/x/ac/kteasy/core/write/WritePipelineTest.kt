@@ -148,7 +148,7 @@ class WritePipelineTest {
         assertEquals(WriteKind.DELETED, plan(WriteInput(g, ctxOf(WriteIntent.DELETE, "R1"), RecordDraft(), tomb)).kind, "已删再删＝幂等无变化")
         assertEquals(WriteKind.RESTORED, plan(WriteInput(g, ctxOf(WriteIntent.RESTORE, "R1"), RecordDraft(), tomb)).kind)
         assertNull(plan(WriteInput(g, ctxOf(WriteIntent.RESTORE, "R1"), RecordDraft(), tomb)).columnBindings["deleted_at"], "恢复＝清 deleted_at")
-        assertEquals("2026-09-23 10:30:00", plan(WriteInput(g, ctxOf(WriteIntent.DELETE, "R1"), RecordDraft(), live)).columnBindings["deleted_at"], "删除时刻与 updated_at 同一 UTC 墙钟形状")
+        assertEquals(java.time.LocalDateTime.of(2026, 9, 23, 10, 30, 0), plan(WriteInput(g, ctxOf(WriteIntent.DELETE, "R1"), RecordDraft(), live)).columnBindings["deleted_at"], "删除时刻与 updated_at 同一 UTC 墙钟、同一绑定类型")
     }
 
     @Test
@@ -314,7 +314,7 @@ class WritePipelineTest {
         assertEquals("u1", c["updated_by"])
         assertEquals("DRAFT", c["approval_state"])
         assertEquals(1L, c["row_version"])
-        assertEquals("2026-09-23 10:30:00", c["updated_at"], "UTC 裸墙钟串（与 SqlRenderer 同一 WallClock 出口）")
+        assertEquals(java.time.LocalDateTime.of(2026, 9, 23, 10, 30, 0), c["updated_at"], "写入侧时间列绑 java.time（PG 赋值位不吃字符串）")
         assertEquals(c["updated_at"], c["created_at"])
     }
 
@@ -438,6 +438,30 @@ class WritePipelineTest {
         assertEquals(DraftValue.Cleared, cleared.extValues["memo"])
         assertEquals(DraftValue.Text("甲"), cleared.extValues["name"])
         assertEquals(DraftValue.Text("13800001111"), cleared.extValues["phone"])
+    }
+
+    /**
+     * 数字按**值**比、不按字符串比。
+     *
+     * 起因是块 5 双库 IT：`12.50` 写进 ext 后 MySQL 的 JSON 规范化回读成 `12.5`，字符串等值把
+     * 一次「什么都没改」的整单保存判成变更（PG 的 jsonb 保留尾零，故只在 MySQL 复现）。
+     * 误判的代价不止脏 diff：M3「结果一致则跳过」会失效并连带触发级联。
+     */
+    @Test
+    fun `数字尾零差异不算变更 文本差异仍算`() {
+        val g = graphOf(field("amount", LogicalType.DECIMAL), field("memo", LogicalType.TEXT))
+        val row = WriteRow("R1", 5, values = mapOf("amount" to DraftValue.Number("12.5"), "memo" to DraftValue.Text("m")))
+        val same = plan(WriteInput(g, ctxOf(recordId = "R1", expectedVersion = 5), RecordDraft.of("amount" to DraftValue.Number("12.50")), row))
+        assertTrue(same.diff.isEmpty(), "12.5 与 12.50 是同一个值，不该产生 diff：${same.diff}")
+        assertTrue(same.warnings.isEmpty(), "无变化也就不该有盲覆盖告警")
+        val changed = plan(WriteInput(g, ctxOf(recordId = "R1", expectedVersion = 5), RecordDraft.of("amount" to DraftValue.Number("12.6")), row))
+        assertEquals(setOf("amount"), changed.diff.keys)
+        // 阶段 6 净化在裁决之前：提交 "m " 会被 normalize 成 "m"，与库里现值同字 → 无变化可跳。
+        // 这条记录在案，是为了让「净化先于 diff」这个顺序不被顺手调换（调换了 M3 会因空格差异白跑一轮级联）。
+        val spaced = plan(WriteInput(g, ctxOf(recordId = "R1", expectedVersion = 5), RecordDraft.of("memo" to DraftValue.Text("m ")), row))
+        assertTrue(spaced.diff.isEmpty(), "净化后与现值同字，不该产生 diff：${spaced.diff}")
+        val real = plan(WriteInput(g, ctxOf(recordId = "R1", expectedVersion = 5), RecordDraft.of("memo" to DraftValue.Text("m2")), row))
+        assertEquals(setOf("memo"), real.diff.keys, "改了字就必须是变更")
     }
 
     // ---------- 阶段 2 守卫接缝 ----------

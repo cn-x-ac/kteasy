@@ -46,7 +46,9 @@ class RowValues(
         raw: Map<String, Any?>,
         fields: List<MdField>,
     ): WriteRow {
-        val values = LinkedHashMap(codec.decode(raw[SystemColumns.EXT] as String?))
+        // jsonb 回读在 PG 侧是驱动私有对象（其字符串形式就是 JSON 原文）、MySQL 侧本来就是字符串——
+        // 统一 toString() 而不是强转：块 5 双库 IT 第一次真连 PG 就把它炸出来了。
+        val values = LinkedHashMap(codec.decode(raw[SystemColumns.EXT]?.toString()))
         fields.filter { it.storageKind == StorageKind.COLUMN }.forEach { f ->
             columnValue(raw[f.apiName])?.let { values[f.apiName] = it }
         }

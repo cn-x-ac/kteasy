@@ -186,15 +186,15 @@ class WritePipeline(
         columns["owner_user"] = input.existing?.ownerUser ?: input.ctx.actor.userId
         columns["owner_dept"] = input.existing?.ownerDept ?: input.ctx.actor.deptId
         if (creating) {
-            columns["created_at"] = WallClock.timestamp(now)
+            columns["created_at"] = WallClock.utcLocalDateTime(now)
             columns["created_by"] = input.ctx.actor.userId
         }
-        columns["updated_at"] = WallClock.timestamp(now)
+        columns["updated_at"] = WallClock.utcLocalDateTime(now)
         columns["updated_by"] = input.ctx.actor.userId
         columns["approval_state"] = input.existing?.approvalState ?: "DRAFT"
         columns["deleted_at"] =
             when (located.kind) {
-                WriteKind.DELETED -> WallClock.timestamp(now)
+                WriteKind.DELETED -> WallClock.utcLocalDateTime(now)
                 else -> null // RESTORED＝清回未删；UPDATED/CREATED 本来就该是 null
             }
         columns["row_version"] = next
@@ -468,14 +468,36 @@ class WritePipeline(
         }
     }
 
-    /** 值等价判定（同值即「未变」）：结构相等即可，Cleared 与非空旧值算变化、与无旧值算未变。 */
+    /**
+     * 值等价判定——diff 与 `NO_UPDATE` 共用同一把尺（两处判据不一致会造出「diff 说没变、档位说变了」）。
+     *
+     * **数字按值比、不按字符串比**：`12.50` 写进 ext 后 MySQL 的 JSON 规范化回读成 `12.5`
+     * （PG 的 jsonb 保留尾零），字符串等值会把一次「什么都没改」的整单保存误判成变更——
+     * 代价不只是脏 diff，M3「结果一致则跳过」会失效并连带触发级联。块 5 双库 IT 抓到。
+     */
     private fun sameValue(
         old: DraftValue?,
         @Suppress("PARAMETER_NAME") new: DraftValue,
     ): Boolean =
         when {
-            new is DraftValue.Cleared -> old == null
+            new is DraftValue.Cleared -> old == null || old is DraftValue.Cleared
+            old is DraftValue.Number && new is DraftValue.Number -> numberEquals(old.literal, new.literal)
+            old is DraftValue.Many && new is DraftValue.Many -> old.items == new.items
             else -> old == new
+        }
+
+    /**
+     * 解析不动就退回字符串相等：宁可不判等（多出一条 diff），也不把非法数字当 0——
+     * 后者会让一次假变更变成一次假跳过。
+     */
+    private fun numberEquals(
+        a: String,
+        b: String,
+    ): Boolean =
+        try {
+            BigDecimal(a).compareTo(BigDecimal(b)) == 0
+        } catch (e: NumberFormatException) {
+            a == b
         }
 
     /**
@@ -535,7 +557,9 @@ class WritePipeline(
             val newVal = if (nv is DraftValue.Cleared) null else nv
             if (creating) {
                 if (newVal != null) out[api] = FieldDiff(api, null, newVal)
-            } else if (old != newVal) {
+            } else if (newVal == null) {
+                if (old != null && old !is DraftValue.Cleared) out[api] = FieldDiff(api, old, null)
+            } else if (!sameValue(old, newVal)) {
                 out[api] = FieldDiff(api, old, newVal)
             }
         }
@@ -566,6 +590,20 @@ class WritePipeline(
                 value.value
             }
 
+            // 时间型真列必须绑 java.time 值：绑字符串在 PG 的**赋值位**会被判成 varchar
+            // （查询侧的比较语境能推断，故这个坑只在写入通道暴露——块 5 实测）。
+            field.logicalType == LogicalType.DATE -> {
+                (value as? DraftValue.Text)?.value?.let { dateLiteral(it) }
+            }
+
+            field.logicalType == LogicalType.DATETIME -> {
+                (value as? DraftValue.Text)?.value?.let { dateTimeLiteral(it) }
+            }
+
+            field.logicalType == LogicalType.TIME -> {
+                (value as? DraftValue.Text)?.value?.let { timeLiteral(it) }
+            }
+
             value is DraftValue.Many -> {
                 value.items.joinToString(",")
             }
@@ -578,6 +616,26 @@ class WritePipeline(
                 null
             }
         }
+
+    /**
+     * 时间字面量解析。解析失败**直接抛**、不退回绑字符串：M1-04 的类型矩阵已管住格式，
+     * 走到这里还解析不动就说明两侧格式约定分叉了——那是要当场看见的 bug，不是可静默绕过的输入问题。
+     */
+    private fun dateLiteral(
+        raw: String,
+    ): java.time.LocalDate = java.time.LocalDate.parse(raw.trim().take(10))
+
+    private fun dateTimeLiteral(
+        raw: String,
+    ): java.time.LocalDateTime {
+        val s = raw.trim().replace('T', ' ')
+        val padded = if (s.length == 19) s else (s + ":00").take(19)
+        return java.time.LocalDateTime.parse(padded)
+    }
+
+    private fun timeLiteral(
+        raw: String,
+    ): java.time.LocalTime = java.time.LocalTime.parse(raw.trim().take(8))
 
     private fun defaultOf(
         field: MdField,

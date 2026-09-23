@@ -91,6 +91,9 @@ class MetadataSchemaTest {
                         "option_set_id",
                         "seq",
                         "enabled",
+                        // M1-06：服务端硬只读的元数据位（一列档位 + 一列必填作用域）
+                        "write_policy",
+                        "required_scope",
                         "created_at",
                         "updated_at",
                     ),

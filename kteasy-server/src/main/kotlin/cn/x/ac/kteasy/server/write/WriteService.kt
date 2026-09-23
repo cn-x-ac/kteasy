@@ -106,6 +106,17 @@ class WriteService(
         try {
             val existing = ctx.recordId?.let { id -> readForUpdate(ctx.objectApi, id)?.let { rows.toRow(it, graph.fields) } }
             val plan = pipeline.plan(WriteInput(graph, ctx, draft, existing))
+
+            // **无变化即不写**：不发 UPDATE、不推 row_version、不发提交事件。
+            // 卡面 GWT4 的 diff 是这件事的数据源，M3「执行结果与目标一致时自动跳过（连级联一起跳过）」也挂在这里——
+            // 若把空 diff 也写成一次变更，每次整单保存都会制造一条假变更与一轮级联触发。
+            // 条件刻意包含 UPDATED：软删/恢复的变化落在 deleted_at、不进 diff，
+            // 只按「diff 为空」判跳过会把删除误判成无变化（块 5 双库 IT 第一次跑就抓到）。
+            if (plan.kind == WriteKind.UPDATED && plan.diff.isEmpty()) {
+                log.debug("无变化，跳过写入 object={} id={} 版本={}", ctx.objectApi, plan.id, plan.expectedVersion)
+                return WriteResult(plan.id, plan.expectedVersion, plan.kind, emptyMap(), plan.warnings)
+            }
+
             val affected = persist(ctx, plan)
             if (plan.kind == WriteKind.UPDATED && affected == 0) {
                 throw WriteErrors.conflictRetry(plan.id, plan.expectedVersion, existing?.rowVersion ?: -1L)

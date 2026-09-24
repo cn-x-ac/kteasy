@@ -20,6 +20,8 @@ import cn.x.ac.kteasy.core.kernel.KnownKteasyException
 import cn.x.ac.kteasy.core.kernel.Ulid
 import cn.x.ac.kteasy.core.schema.dialect.LockKey
 import cn.x.ac.kteasy.core.schema.dialect.SchemaProvider
+import cn.x.ac.kteasy.core.write.DetailDiffer
+import cn.x.ac.kteasy.core.write.DetailRow
 import cn.x.ac.kteasy.core.write.ExtCodec
 import cn.x.ac.kteasy.core.write.InternalWriteSources
 import cn.x.ac.kteasy.core.write.RecordDraft
@@ -69,11 +71,70 @@ class WriteService(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    /** 单条写（新建/更新/软删/恢复共用一个入口，靠 [WriteContext.intent] 与 recordId 区分性质）。 */
+    /**
+     * 单条写（新建/更新/软删/恢复共用一个入口，靠 [WriteContext.intent] 与 recordId 区分性质）。
+     * 载荷带 `details` 时＝父 + 子树一并写（同事务、父锁横跨子树）；不带即普通单条。
+     */
     fun write(
         ctx: WriteContext,
         draft: RecordDraft,
-    ): WriteResult = tx.execute { doWrite(ctx, draft) } ?: throw KnownKteasyException(ApiError.INTERNAL, "写事务未返回结果")
+    ): WriteResult = writeWithDetails(ctx, draft)
+
+    /**
+     * 父 + 子项差量的一体化写（M1-07 块 2；A1 载荷）。全程**单事务**：主记录先写、拿到父 id 后
+     * 逐子对象算三集并落库，任一子行失败＝整棵子树回滚（卡面 GWT1「中途注入异常→全回滚」）。
+     *
+     * 锁序按卡面 §1：先取**父记录写锁并横跨整棵子树持有**（串行化对同一父的并发明细写），
+     * 子对象按 api_name 字典序、其内既有行（更新+软删）按 id 升序、新建其后。
+     */
+    fun writeWithDetails(
+        ctx: WriteContext,
+        draft: RecordDraft,
+    ): WriteResult {
+        val deleteLike = ctx.intent == WriteIntent.DELETE || ctx.intent == WriteIntent.RESTORE
+        require(!deleteLike || draft.details.isEmpty()) {
+            "软删/恢复不接受 details（删除就是删除，夹带改子表＝伪装成删除的顺带写）"
+        }
+        return tx.execute {
+            val (_, pgraph) = cache.graph(ctx.objectApi)
+            val pKey = ctx.recordId?.let { WriteLocks.of(pgraph.objectMeta.id, it) }
+            pKey?.let { acquire(it) }
+            try {
+                val parent = writeLocked(ctx, pgraph, draft.copy(details = emptyMap()))
+                if (draft.details.isNotEmpty()) writeChildren(ctx, parent.id, draft.details)
+                parent
+            } finally {
+                pKey?.let { release(it) }
+            }
+        } ?: throw KnownKteasyException(ApiError.INTERNAL, "写事务未返回结果")
+    }
+
+    /** 子对象按 api 字典序；每子对象内既有行操作按 id 升序、新建其后（各自 doWrite 取放子行锁，父锁已在上层持有）。 */
+    private fun writeChildren(
+        ctx: WriteContext,
+        parentId: String,
+        details: Map<String, List<DetailRow>>,
+    ) {
+        for ((childApi, rows) in details.entries.sortedBy { it.key }) {
+            val existing = existingChildIds(childApi, parentId)
+            val diff = DetailDiffer.diff(childApi, rows, existing)
+            val updateById = diff.updates.associateBy { it.id!! }
+            val deleteIds = diff.deletes.toSet()
+            for (id in (updateById.keys + deleteIds).sorted()) {
+                val childCtx = ctx.copy(objectApi = childApi, parentId = parentId, recordId = id, intent = if (id in deleteIds) WriteIntent.DELETE else WriteIntent.UPSERT, expectedVersion = null)
+                doWrite(childCtx, updateById[id]?.let { RecordDraft(it.fields) } ?: RecordDraft())
+            }
+            for (r in diff.creates) {
+                val childCtx = ctx.copy(objectApi = childApi, parentId = parentId, recordId = null, intent = WriteIntent.UPSERT, expectedVersion = null)
+                doWrite(childCtx, RecordDraft(r.fields))
+            }
+        }
+    }
+
+    private fun existingChildIds(
+        childApi: String,
+        parentId: String,
+    ): Set<String> = jdbc.queryForList(renderer.childIdsSql(childApi), MapSqlParameterSource(mapOf("__pid" to parentId)), String::class.java).map { it!! }.toSet()
 
     /**
      * 批量写＝循环单条、**各自事务**（卡面 §6 默认）。一条失败不回滚整批——
@@ -100,44 +161,56 @@ class WriteService(
         draft: RecordDraft,
     ): WriteResult {
         val (_, graph) = cache.graph(ctx.objectApi)
-        val objectId = graph.objectMeta.id
-        val key = ctx.recordId?.let { WriteLocks.of(objectId, it) }
+        val key = ctx.recordId?.let { WriteLocks.of(graph.objectMeta.id, it) }
         key?.let { acquire(it) }
         try {
-            val existing = ctx.recordId?.let { id -> readForUpdate(ctx.objectApi, id)?.let { rows.toRow(it, graph.fields) } }
-            val plan = pipeline.plan(WriteInput(graph, ctx, draft, existing))
-
-            // **无变化即不写**：不发 UPDATE、不推 row_version、不发提交事件。
-            // 卡面 GWT4 的 diff 是这件事的数据源，M3「执行结果与目标一致时自动跳过（连级联一起跳过）」也挂在这里——
-            // 若把空 diff 也写成一次变更，每次整单保存都会制造一条假变更与一轮级联触发。
-            // 条件刻意包含 UPDATED：软删/恢复的变化落在 deleted_at、不进 diff，
-            // 只按「diff 为空」判跳过会把删除误判成无变化（块 5 双库 IT 第一次跑就抓到）。
-            if (plan.kind == WriteKind.UPDATED && plan.diff.isEmpty()) {
-                log.debug("无变化，跳过写入 object={} id={} 版本={}", ctx.objectApi, plan.id, plan.expectedVersion)
-                return WriteResult(plan.id, plan.expectedVersion, plan.kind, emptyMap(), plan.warnings)
-            }
-
-            val affected = persist(ctx, plan)
-            if (plan.kind == WriteKind.UPDATED && affected == 0) {
-                throw WriteErrors.conflictRetry(plan.id, plan.expectedVersion, existing?.rowVersion ?: -1L)
-            }
-            publisher.publishEvent(
-                WriteCommittedEvent(
-                    eventId = Ulid.next(),
-                    traceId = ctx.traceId,
-                    objectApi = ctx.objectApi,
-                    recordId = plan.id,
-                    kind = plan.kind,
-                    source = ctx.source,
-                    actor = ctx.actor,
-                    diff = plan.diff,
-                ),
-            )
-            log.debug("写入完成 object={} id={} kind={} 变更数={} 版本={}", ctx.objectApi, plan.id, plan.kind, plan.diff.size, plan.rowVersionNext)
-            return WriteResult(plan.id, plan.rowVersionNext, plan.kind, plan.diff, plan.warnings)
+            return writeLocked(ctx, graph, draft)
         } finally {
             key?.let { release(it) }
         }
+    }
+
+    /**
+     * 写锁**已持有**前提下的单记录落库（阶段 8–12 的执行体）。
+     * 由 [doWrite]（自持锁）与 [writeWithDetails]（父锁横跨子树）共用——拆出这段是为了让父锁能罩住子行写，
+     * 而不是每记录各取各放（那会让同一父的并发明细写交错，见卡面 §1 锁序）。
+     */
+    private fun writeLocked(
+        ctx: WriteContext,
+        graph: cn.x.ac.kteasy.core.meta.MetadataGraph,
+        draft: RecordDraft,
+    ): WriteResult {
+        val existing = ctx.recordId?.let { id -> readForUpdate(ctx.objectApi, id)?.let { rows.toRow(it, graph.fields) } }
+        val plan = pipeline.plan(WriteInput(graph, ctx, draft, existing))
+
+        // **无变化即不写**：不发 UPDATE、不推 row_version、不发提交事件。
+        // 卡面 GWT4 的 diff 是这件事的数据源，M3「执行结果与目标一致时自动跳过（连级联一起跳过）」也挂在这里——
+        // 若把空 diff 也写成一次变更，每次整单保存都会制造一条假变更与一轮级联触发。
+        // 条件刻意包含 UPDATED：软删/恢复的变化落在 deleted_at、不进 diff，
+        // 只按「diff 为空」判跳过会把删除误判成无变化（块 5 双库 IT 第一次跑就抓到）。
+        if (plan.kind == WriteKind.UPDATED && plan.diff.isEmpty()) {
+            log.debug("无变化，跳过写入 object={} id={} 版本={}", ctx.objectApi, plan.id, plan.expectedVersion)
+            return WriteResult(plan.id, plan.expectedVersion, plan.kind, emptyMap(), plan.warnings)
+        }
+
+        val affected = persist(ctx, plan)
+        if (plan.kind == WriteKind.UPDATED && affected == 0) {
+            throw WriteErrors.conflictRetry(plan.id, plan.expectedVersion, existing?.rowVersion ?: -1L)
+        }
+        publisher.publishEvent(
+            WriteCommittedEvent(
+                eventId = Ulid.next(),
+                traceId = ctx.traceId,
+                objectApi = ctx.objectApi,
+                recordId = plan.id,
+                kind = plan.kind,
+                source = ctx.source,
+                actor = ctx.actor,
+                diff = plan.diff,
+            ),
+        )
+        log.debug("写入完成 object={} id={} kind={} 变更数={} 版本={}", ctx.objectApi, plan.id, plan.kind, plan.diff.size, plan.rowVersionNext)
+        return WriteResult(plan.id, plan.rowVersionNext, plan.kind, plan.diff, plan.warnings)
     }
 
     private fun readForUpdate(

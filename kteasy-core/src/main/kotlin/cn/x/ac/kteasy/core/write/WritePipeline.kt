@@ -23,6 +23,7 @@ import cn.x.ac.kteasy.core.meta.LogicalType
 import cn.x.ac.kteasy.core.meta.MdField
 import cn.x.ac.kteasy.core.meta.MetadataGraph
 import cn.x.ac.kteasy.core.meta.MetadataValidator
+import cn.x.ac.kteasy.core.meta.ObjectKind
 import cn.x.ac.kteasy.core.meta.StorageKind
 import cn.x.ac.kteasy.core.meta.SystemColumns
 import cn.x.ac.kteasy.core.meta.TypeRegistry
@@ -199,6 +200,14 @@ class WritePipeline(
         if (creating) {
             columns["created_at"] = WallClock.utcLocalDateTime(now)
             columns["created_by"] = input.ctx.actor.userId
+            // 子项必须挂主（parent_id 是子表 NOT NULL + FK 列）：parentId 只可能来自 writeWithDetails 的注入，
+            // 缺它即内部不变量被破坏（有人绕过编排层直接写子对象）——守卫拒，绝不让子行以孤儿落库。
+            if (input.graph.objectMeta.kind == ObjectKind.CHILD) {
+                columns["parent_id"] = input.ctx.parentId ?: throw WriteErrors.forbidden(
+                    "子项写入缺主记录 id（parent_id 只能由编排层注入）",
+                    mapOf("object" to input.ctx.objectApi),
+                )
+            }
         }
         columns["updated_at"] = WallClock.utcLocalDateTime(now)
         columns["updated_by"] = input.ctx.actor.userId

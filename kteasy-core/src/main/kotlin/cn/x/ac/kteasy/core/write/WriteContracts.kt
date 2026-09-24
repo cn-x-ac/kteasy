@@ -130,6 +130,13 @@ data class WriteContext(
     val now: ZonedDateTime,
     val recordId: String? = null,
     val expectedVersion: Long? = null,
+    /**
+     * 子项写入的主记录 id（M1-07 块 2；仅 [cn.x.ac.kteasy.core.meta.ObjectKind.CHILD] 对象用）。
+     *
+     * 与 `created_at` 同属**服务端系统值**：调用方永远不能在载荷里带 `parent_id`（阶段 4 已拒），
+     * 只能由编排层 `writeWithDetails` 在写完主记录后注入。缺它写子项＝内部不变量被破坏，守卫拒。
+     */
+    val parentId: String? = null,
 )
 
 /**

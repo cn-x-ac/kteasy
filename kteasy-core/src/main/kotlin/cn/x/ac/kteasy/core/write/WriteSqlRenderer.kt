@@ -111,6 +111,14 @@ class WriteSqlRenderer(
         )
 
     /**
+     * 列某父记录下现存活子行 id（M1-07 块 2 子项三集的数据源）。软删的不计（`deleted_at IS NULL`）。
+     * 占位符 `:__pid` 由调用方绑定；编排层已在父锁保护下、同事务同连接读取，无需 forUpdate。
+     */
+    fun childIdsSql(
+        objectApi: String,
+    ): String = "SELECT id FROM " + table(objectApi) + " WHERE parent_id = :__pid AND deleted_at IS NULL ORDER BY id"
+
+    /**
      * 参数名与 SQL 里的占位符一一对应：普通列为 `:v_<列名>`，`ext` 例外——它要经
      * `provider.json.bindJson("ext")` 生成方言绑定片段，占位符名由方言侧决定，故这里也必须叫 `ext`。
      */

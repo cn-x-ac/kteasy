@@ -79,6 +79,8 @@ class WritePipelineTest {
         vararg fields: MdField,
         quick: String? = null,
         disabled: Boolean = false,
+        kind: cn.x.ac.kteasy.core.meta.ObjectKind = ObjectKind.PARENT,
+        parentId: String? = null,
     ): MetadataGraph =
         MetadataGraph(
             objectMeta =
@@ -86,7 +88,8 @@ class WritePipelineTest {
                     id = "OBJ1",
                     apiName = "account",
                     label = "客户",
-                    kind = ObjectKind.PARENT,
+                    kind = kind,
+                    parentObjectId = parentId,
                     quickSearchJson = quick,
                     disabled = disabled,
                 ),
@@ -103,7 +106,8 @@ class WritePipelineTest {
         recordId: String? = null,
         expectedVersion: Long? = null,
         source: WriteSource = WriteSource.UI,
-    ) = WriteContext("account", intent, source, WriteActor("u1", "d1"), "tr-1", now, recordId, expectedVersion)
+        parentId: String? = null,
+    ) = WriteContext("account", intent, source, WriteActor("u1", "d1"), "tr-1", now, recordId, expectedVersion, parentId)
 
     private fun plan(
         input: WriteInput,
@@ -517,5 +521,24 @@ class WritePipelineTest {
         assertNull(skipped.extValues["no"])
         assertEquals(listOf(WriteWarnings.AUTONUM_SKIPPED), skipped.warnings.map { it.code })
         assertEquals("no", skipped.warnings.single().field)
+    }
+
+    // ---------- 块2 parent_id 注入（M1-07 A1；子对象新建挂主，缺主守卫拒不落孤儿） ----------
+
+    @Test
+    fun `子对象新建注入 parent_id`() {
+        val g = graphOf(field("qty", LogicalType.NUMBER), kind = cn.x.ac.kteasy.core.meta.ObjectKind.CHILD)
+        val created = plan(WriteInput(g, ctxOf(parentId = "PARENT1"), RecordDraft.of("qty" to DraftValue.Number("3"))))
+        assertEquals("PARENT1", created.columnBindings["parent_id"], "子表 parent_id 由 ctx 注入，与 created_at 同属服务端系统值")
+    }
+
+    @Test
+    fun `子对象缺 parentId 守卫拒 绝不落孤儿`() {
+        val g = graphOf(field("qty", LogicalType.NUMBER), kind = cn.x.ac.kteasy.core.meta.ObjectKind.CHILD)
+        val ex =
+            assertFailsWith(KnownKteasyException::class) {
+                WritePipeline(newId = { "X".repeat(26) }).plan(WriteInput(g, ctxOf(), RecordDraft.of("qty" to DraftValue.Number("3"))))
+            }
+        assertEquals(ApiError.FORBIDDEN, ex.apiError)
     }
 }

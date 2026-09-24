@@ -129,6 +129,34 @@ class FlywayMigrationsTest {
         }
     }
 
+    /** M1-07 编号表验收：V4 迁移成功；md_autonum_rule 落 md 区、kteasy_autonum_seq 落引擎 kteasy 区，id/引用列钉 binary。 */
+    @Test
+    fun `M1-07 编号表迁移成功且命名 binary 落区正确`() {
+        val pg = context.dialect == Dialect.POSTGRESQL
+        val bin = if (pg) "C" else "utf8mb4_bin"
+        val applied = flyway.info().applied().associate { (it.version?.version ?: "<n/a>") to it.state.name }
+        assertThat(applied["4"]).`as`("V4 迁移成功").isEqualTo("SUCCESS")
+
+        // md_autonum_rule：md 区、id/object_id/field_id 钉 binary、segments_json 属 JSON 族
+        assertThat(existsIn("md", "md_autonum_rule")).`as`("md.md_autonum_rule 应存在").isTrue()
+        listOf("id", "object_id", "field_id").forEach { c ->
+            assertThat(collationIn("md", "md_autonum_rule", c)).`as`("md_autonum_rule.$c 应为 binary").isEqualTo(bin)
+        }
+        val ruleCols = columns("md_autonum_rule", if (pg) "md" else null)
+        assertThat(ruleCols.keys).containsExactlyInAnyOrder("id", "object_id", "field_id", "segments_json", "created_at", "updated_at")
+        assertThat(ruleCols["segments_json"]).`as`("segments_json 属 JSON 族").isIn(setOf(Types.OTHER, Types.LONGVARCHAR, Types.VARCHAR, Types.SQLXML))
+
+        // kteasy_autonum_seq：引擎 kteasy 区（同 kteasy_meta）、rule_id 钉 binary、period_key 非标识符列不吃（MySQL 反证）
+        assertThat(existsIn("kteasy", "kteasy_autonum_seq")).`as`("kteasy.kteasy_autonum_seq 应存在（引擎区）").isTrue()
+        assertThat(collationIn("kteasy", "kteasy_autonum_seq", "rule_id")).`as`("rule_id 应为 binary").isEqualTo(bin)
+        val seqCols = columns("kteasy_autonum_seq", if (pg) "kteasy" else null)
+        assertThat(seqCols.keys).containsExactlyInAnyOrder("rule_id", "period_key", "seq_value", "updated_at")
+        assertThat(seqCols["seq_value"]).`as`("seq_value 为 BIGINT").isEqualTo(Types.BIGINT)
+        if (!pg) {
+            assertThat(collationIn("kteasy", "kteasy_autonum_seq", "period_key")).`as`("period_key 非 id 列保持表默认").isEqualTo("utf8mb4_0900_ai_ci")
+        }
+    }
+
     /** 压扁后终态 schema dump（供评审；仅当设了 KTEASY_SCHEMA_DUMP 环境变量才落盘，走 fork 继承的 env 而非 -D）。 */
     @Test
     fun `压扁后终态 schema dump`() {
@@ -211,6 +239,52 @@ class FlywayMigrationsTest {
             conn.prepareStatement(sql).use { ps ->
                 ps.setString(1, table)
                 ps.setString(2, column)
+                ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+            }
+        }
+    }
+
+    /** schema 参数化存在性判定（M1-07 编号表跨 md 区与引擎 kteasy 区，故不能沿用硬编码 md 的 existsTable）。 */
+    private fun existsIn(
+        pgSchema: String,
+        name: String,
+    ): Boolean {
+        val pg = context.dialect == Dialect.POSTGRESQL
+        val sql =
+            if (pg) {
+                "SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ?"
+            } else {
+                "SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?"
+            }
+        return dataSource.connection.use { conn ->
+            conn.prepareStatement(sql).use { ps ->
+                var i = 1
+                if (pg) ps.setString(i++, pgSchema)
+                ps.setString(i, name)
+                ps.executeQuery().use { rs -> rs.next() }
+            }
+        }
+    }
+
+    /** schema 参数化列 collation 判定（同 [existsIn]，覆盖非 md 区）。 */
+    private fun collationIn(
+        pgSchema: String,
+        table: String,
+        column: String,
+    ): String? {
+        val pg = context.dialect == Dialect.POSTGRESQL
+        val sql =
+            if (pg) {
+                "SELECT collation_name FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND column_name = ?"
+            } else {
+                "SELECT COLLATION_NAME FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?"
+            }
+        return dataSource.connection.use { conn ->
+            conn.prepareStatement(sql).use { ps ->
+                var i = 1
+                if (pg) ps.setString(i++, pgSchema)
+                ps.setString(i++, table)
+                ps.setString(i, column)
                 ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
             }
         }

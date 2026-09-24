@@ -166,9 +166,14 @@ sealed interface DraftValue {
  *
  * 未注册的 key **不在这里丢弃**——阶段 4 按「unknown ext key 拒收」出 410 并回显 key 名（卡面反例），
  * 静默丢键会让调用方的拼写错误变成无声的数据缺失。
+ *
+ * @property details 子项差量载荷（A1 定稿：`子对象 api_name → 该子表的行`）。语义与字段级 PATCH 同轴：
+ *   **缺某个子对象键＝本次不碰该子表**；**给空数组＝清空该子表全部（软删）**。块 2 只支持一层——
+ *   子行是 [DetailRow]（不含 details），孙级在类型上就无法表达、传输层解析到即拒（P10/A1）。
  */
 data class RecordDraft(
     val values: Map<String, DraftValue> = emptyMap(),
+    val details: Map<String, List<DetailRow>> = emptyMap(),
 ) {
     /** 本次是否触碰该字段（含显式清空）。 */
     fun touches(
@@ -178,8 +183,36 @@ data class RecordDraft(
     /** 触碰到的字段集合（守卫、diff、审计共用）。 */
     val touchedFields: Set<String> get() = values.keys
 
+    /** 本次触碰到的子对象集合（缺键的不在内＝不碰）。 */
+    val touchedDetails: Set<String> get() = details.keys
+
     companion object {
-        fun of(vararg pairs: Pair<String, DraftValue>): RecordDraft = RecordDraft(pairs.toMap())
+        fun of(
+            vararg pairs: Pair<String, DraftValue>,
+        ): RecordDraft = RecordDraft(pairs.toMap())
+    }
+}
+
+/**
+ * 子项行（A1）：`{id?, fields}`——复用字段值代数，独立成类而非塞进 [RecordDraft]，
+ * 是为了让「只支持一层」成为**类型约束**（本类没有 details 槽，孙级写不出来），
+ * 也让子行 id 与父记录 id（恒在 [WriteContext.recordId]）分处两地、不混。
+ *
+ * @property id 既有子行 id；null＝新建。带 id 但不在本父现存集内＝定位失败（404 `WRITE_NOT_FOUND`）。
+ */
+data class DetailRow(
+    val id: String? = null,
+    val fields: Map<String, DraftValue> = emptyMap(),
+) {
+    companion object {
+        fun of(
+            vararg pairs: Pair<String, DraftValue>,
+        ): DetailRow = DetailRow(null, pairs.toMap())
+
+        fun of(
+            id: String,
+            vararg pairs: Pair<String, DraftValue>,
+        ): DetailRow = DetailRow(id, pairs.toMap())
     }
 }
 

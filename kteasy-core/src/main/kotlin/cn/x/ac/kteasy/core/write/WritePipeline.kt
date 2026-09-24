@@ -85,13 +85,15 @@ data class WritePlan(
  * 两批违规各自聚合，承载码仍统一由 `WriteErrors.violation()` 按符号名派生（P2）。
  *
  * @param newId 新建主键生成器（注入以保证单测可复现；缺省 ULID）
- * @param autonum 自动编号取号桩——**M1-07 实现**（卡面 §2：本卡桩）。返回 null 即不填值。
+ * @param autonum 自动编号取号——**M1-07 实装**。第二参＝截至当前已裁决的字段值快照（含默认值，
+ *   供模板「字段变量」段渲染；后置字段取不到属已知边界，渲染为空串）。返回 null 即不填值。
+ *   取号失败应抛 [WriteErrors]（如 `AUTONUM_FAILED`），禁静默跳过——静默会让业务号列假绿。
  * @param searchCode 拼音检索码生成器（装配层用 TinyPinyin 实现；缺省原样返回）
  * @param guard 权限接缝（阶段 2；M2-02 换实现）。块 5 的红绿对测靠注入"拒绝全部"守卫证明无旁路。
  */
 class WritePipeline(
     private val newId: () -> String = { Ulid.next() },
-    private val autonum: (MdField) -> String? = { null },
+    private val autonum: (MdField, Map<String, DraftValue>) -> String? = { _, _ -> null },
     private val searchCode: (String) -> String = { it },
     private val guard: WriteGuard = PassthroughWriteGuard(),
 ) {
@@ -160,7 +162,16 @@ class WritePipeline(
                 if (!f.enabled || derived.containsKey(f.apiName)) continue
                 if (f.writePolicy == FieldWritePolicy.NO_UPDATE && !creating) continue
                 defaultOf(f)?.let { derived[f.apiName] = it }
-                if (f.logicalType == LogicalType.AUTONUM) autonum(f)?.let { derived[f.apiName] = DraftValue.Text(it) }
+                if (f.logicalType == LogicalType.AUTONUM) {
+                    if (input.ctx.source == WriteSource.IMPORT) {
+                        // 【全景】导入不推进编号（M1-07 决策台 P14）：导入文件应自带编号，自带时走正常载荷
+                        // 不会进到这里；不带也不代取号（防批量导入一次性吃光号段），记告警放行、字段留空。
+                        // 已知后果（如实留档）：导入值与计数器从此分叉，迁移场景需事后对齐计数器。
+                        warnings += WriteWarning(WriteWarnings.AUTONUM_SKIPPED, f.apiName, "导入不推进编号，字段留空")
+                    } else {
+                        autonum(f, derived)?.let { derived[f.apiName] = DraftValue.Text(it) }
+                    }
+                }
             }
         }
         requiredViolations(input, derived, creating).let { if (it.isNotEmpty()) throw WriteErrors.rejected(it) }

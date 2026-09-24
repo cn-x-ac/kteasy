@@ -183,6 +183,26 @@ class DialectSqlTest {
         assertThat(mySql).contains("ON DUPLICATE KEY UPDATE n = VALUES(n)").doesNotContain("RETURNING")
     }
 
+    /** M1-07 取号计数推进：PG 单语句 RETURNING；MySQL ODKU + LAST_INSERT_ID 技巧 + 同连接取回语句。 */
+    @Test
+    fun `取号计数推进 PG 单语句RETURNING MySQL 走LAST_INSERT_ID加取回`() {
+        val pgSql = pg.upsert.buildCounterBump("kteasy.kteasy_autonum_seq", listOf("rule_id", "period_key"), "seq_value")
+        assertThat(pgSql)
+            .contains("INSERT INTO kteasy.kteasy_autonum_seq AS t (rule_id, period_key, seq_value)")
+            .contains("VALUES (:rule_id, :period_key, :seq_value)")
+            .contains("ON CONFLICT (rule_id, period_key) DO UPDATE SET seq_value = t.seq_value + 1")
+            .contains("RETURNING seq_value")
+        assertThat(pg.upsert.counterFollowUp()).isNull()
+
+        val mySql = my.upsert.buildCounterBump("kteasy_autonum_seq", listOf("rule_id", "period_key"), "seq_value")
+        assertThat(mySql)
+            .contains("INSERT INTO kteasy_autonum_seq (rule_id, period_key, seq_value)")
+            .contains("VALUES (:rule_id, :period_key, LAST_INSERT_ID(:seq_value))")
+            .contains("ON DUPLICATE KEY UPDATE seq_value = LAST_INSERT_ID(seq_value + 1)")
+            .doesNotContain("RETURNING")
+        assertThat(my.upsert.counterFollowUp()).isEqualTo("SELECT LAST_INSERT_ID()")
+    }
+
     // ---------- Lock / LockingRead / DdlTx ----------
 
     @Test

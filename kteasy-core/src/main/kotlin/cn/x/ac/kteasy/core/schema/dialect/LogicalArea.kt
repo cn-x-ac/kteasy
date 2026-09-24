@@ -46,4 +46,10 @@ enum class LogicalArea(
 
     /** 迁移版本表（Flyway 自身，业务运行期不直引；仅登记映射规则）。 */
     MIGRATION(pgSchema = "kteasy", pgPrefix = "", mysqlPrefix = "kteasy_"),
+
+    /**
+     * 引擎运行态表（M1-07 起）：随每次写操作变化的热数据，非声明式元数据（区别于 [METADATA]）。
+     * PG 落 `kteasy` schema（与 V1 `kteasy_meta` 同区）、MySQL 平铺；逻辑名自带 `kteasy_` 前缀，两侧不加前缀。
+     */
+    ENGINE(pgSchema = "kteasy", pgPrefix = "", mysqlPrefix = ""),
 }

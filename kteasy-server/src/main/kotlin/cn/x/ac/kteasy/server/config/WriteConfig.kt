@@ -25,6 +25,7 @@ import cn.x.ac.kteasy.core.write.WriteGuard
 import cn.x.ac.kteasy.core.write.WritePipeline
 import cn.x.ac.kteasy.core.write.WriteSqlRenderer
 import cn.x.ac.kteasy.server.md.PinyinCodeGenerator
+import cn.x.ac.kteasy.server.write.AutonumSequencer
 import cn.x.ac.kteasy.server.write.WriteEventJournal
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
@@ -53,13 +54,17 @@ class WriteConfig {
     /**
      * 检索码生成器是 Kotlin `object`（M1-04 落地时无状态、无依赖），故直接引用而不绕 Spring 注入——
      * 少一个只为「可注入」而存在的空 bean；换实现时改这一处即可。
+     *
+     * `autonum`＝M1-07 取号器（A5 裁决：扩签名传兄弟值快照，供模板「字段变量」段渲染）。
      */
     @Bean
     fun writePipeline(
         guard: WriteGuard,
+        autonum: AutonumSequencer,
     ): WritePipeline =
         WritePipeline(
             newId = { Ulid.next() },
+            autonum = { field, siblings -> autonum.next(field, siblings) },
             searchCode = { raw -> PinyinCodeGenerator.generate(raw) ?: raw },
             guard = guard,
         )

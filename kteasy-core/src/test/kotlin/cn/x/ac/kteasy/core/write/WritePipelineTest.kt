@@ -482,4 +482,40 @@ class WritePipelineTest {
         assertEquals(ApiError.FORBIDDEN, ex.apiError, "载荷里有未注册键，但守卫在前——违规清单不得泄漏给无权调用方")
         assertEquals(WriteErrors.ID_FORBIDDEN, (ex.data as Map<*, *>)["error_id"])
     }
+
+    // ---------- 阶段 5 编号派生（M1-07 块 1；A5 裁决：取号器收兄弟值快照） ----------
+
+    @Test
+    fun `UI 来源 AUTONUM 由取号器填充 带兄弟值快照`() {
+        val g = graphOf(field("dept", LogicalType.TEXT), field("no", LogicalType.AUTONUM, policy = FieldWritePolicy.DERIVED))
+        var seenSiblings: Map<String, DraftValue>? = null
+        val pipeline =
+            WritePipeline(newId = { "NEWID000000000000000000" }, autonum = { f, siblings ->
+                assertEquals("F_no", f.id)
+                seenSiblings = siblings
+                "NO-0001"
+            })
+        val created = plan(WriteInput(g, ctxOf(), RecordDraft.of("dept" to DraftValue.Text("SH"))), pipeline)
+        assertEquals("NO-0001", created.extValues["no"]?.let { (it as DraftValue.Text).value })
+        assertEquals(DraftValue.Text("SH"), seenSiblings?.get("dept"), "取号器应拿到同记录已裁决值快照（字段变量段渲染用）")
+    }
+
+    @Test
+    fun `导入来源不推进编号 留空出告警`() {
+        // 前提（M1-06 阶段 4 已冻结）：AUTONUM 全来源拒调用方提供值——导入不存在"自带编号"路径，
+        // 故「不推进编号」的完整语义＝不取号、字段留空、记 AUTONUM_SKIPPED 放行。
+        val g = graphOf(field("name", LogicalType.TEXT), field("no", LogicalType.AUTONUM))
+        var called = 0
+        val pipeline =
+            WritePipeline(newId = { "NEWID000000000000000000" }, autonum = { _, _ ->
+                called++
+                "X"
+            })
+
+        val skipped = plan(WriteInput(g, ctxOf(source = WriteSource.IMPORT), RecordDraft.of("name" to DraftValue.Text("甲"))), pipeline)
+        assertEquals(0, called, "导入不得触发取号")
+        assertNull(skipped.extValues["no"])
+        assertEquals(listOf(WriteWarnings.AUTONUM_SKIPPED), skipped.warnings.map { it.code })
+        assertEquals("no", skipped.warnings.single().field)
+    }
 }

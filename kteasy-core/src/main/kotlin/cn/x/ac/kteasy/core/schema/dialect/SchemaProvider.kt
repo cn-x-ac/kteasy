@@ -259,6 +259,22 @@ interface UpsertFragment {
         updateColumns: List<String>,
         returning: String? = null,
     ): String
+
+    /**
+     * 取号计数推进（M1-07 编号规则）：键冲突时 [valueColumn] **自增 1**，首行（新周期）以调用方绑定的
+     * `:[valueColumn]` 起始值落位——注意与 [build] 的差异：冲突分支是「在旧值上加一」，不是覆盖。
+     * PG 单语句 `INSERT .. ON CONFLICT (keys) DO UPDATE SET c = 别名.c + 1 RETURNING c`（[supportsReturning]＝true）；
+     * MySQL `INSERT .. VALUES (.., LAST_INSERT_ID(:c)) ON DUPLICATE KEY UPDATE c = LAST_INSERT_ID(c + 1)`，
+     * 取回值须在同一连接上再执行 [counterFollowUp]（两语句同属一个事务，事务内同一连接即同一 LAST_INSERT_ID 作用域）。
+     */
+    fun buildCounterBump(
+        table: String,
+        keyColumns: List<String>,
+        valueColumn: String,
+    ): String
+
+    /** [buildCounterBump] 的取回语句；不支持 RETURNING 的方言返回非 null（MySQL `SELECT LAST_INSERT_ID()`），PG 返回 null。 */
+    fun counterFollowUp(): String? = null
 }
 
 /** 命名锁的方言封装（M1-06 写入通道锁键用）。 */

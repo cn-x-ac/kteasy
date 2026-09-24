@@ -350,6 +350,19 @@ private object MyUpsert : UpsertFragment {
         // MySQL 无 RETURNING；取号靠 LAST_INSERT_ID() 技巧，由写入层（M1-06）处理，此处忽略 returning。
         return sb.toString()
     }
+
+    // 取号（M1-07）：LAST_INSERT_ID(expr) 把推进后的值走私到连接级变量，随后 counterFollowUp 同连接取回。
+    // 首行以 :seq_value 起始落位（新周期计数桶的第一发就是 start），冲突分支在旧值上加一。
+    override fun buildCounterBump(
+        table: String,
+        keyColumns: List<String>,
+        valueColumn: String,
+    ): String =
+        "INSERT INTO $table (${keyColumns.joinToString(", ")}, $valueColumn) " +
+            "VALUES (${keyColumns.joinToString(", ") { ":$it" }}, LAST_INSERT_ID(:$valueColumn)) " +
+            "ON DUPLICATE KEY UPDATE $valueColumn = LAST_INSERT_ID($valueColumn + 1)"
+
+    override fun counterFollowUp(): String? = "SELECT LAST_INSERT_ID()"
 }
 
 private object MyLock : LockOps {

@@ -368,6 +368,18 @@ private object PgUpsert : UpsertFragment {
         }
         return sb.toString()
     }
+
+    // 取号（M1-07）：给表起别名，冲突分支引用「旧行」别名自增——schema 限定的表名不能直接用作行引用。
+    override fun buildCounterBump(
+        table: String,
+        keyColumns: List<String>,
+        valueColumn: String,
+    ): String =
+        "INSERT INTO $table AS t (${keyColumns.joinToString(", ")}, $valueColumn) " +
+            "VALUES (${keyColumns.joinToString(", ") { ":$it" }}, :$valueColumn) " +
+            "ON CONFLICT (${keyColumns.joinToString(", ")}) " +
+            "DO UPDATE SET $valueColumn = t.$valueColumn + 1 " +
+            "RETURNING $valueColumn"
 }
 
 private object PgLock : LockOps {

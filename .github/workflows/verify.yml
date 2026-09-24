@@ -125,4 +125,5 @@ jobs:
             --tests "cn.x.ac.kteasy.server.query.EqlQueryIT" \
             --tests "cn.x.ac.kteasy.server.query.QueryExitUniquenessIT" \
             --tests "cn.x.ac.kteasy.server.write.WriteChannelIT" \
-            --tests "cn.x.ac.kteasy.server.write.AutonumSeqIT"
+            --tests "cn.x.ac.kteasy.server.write.AutonumSeqIT" \
+            --tests "cn.x.ac.kteasy.server.write.DetailsIT"

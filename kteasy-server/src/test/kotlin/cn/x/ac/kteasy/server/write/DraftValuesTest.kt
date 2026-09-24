@@ -71,4 +71,59 @@ class DraftValuesTest {
         assertEquals(0, DraftValues.toDraft(null).values.size)
         assertEquals(0, DraftValues.toDraft(emptyMap<String?, Any?>()).values.size)
     }
+
+    @Test
+    fun `details 正常解析为子行 map 带id更新无id新建`() {
+        val d =
+            DraftValues.toDraft(
+                linkedMapOf<String?, Any?>("no" to "P1"),
+                linkedMapOf<String?, Any?>(
+                    "order_line" to
+                        listOf(
+                            linkedMapOf("id" to "L1", "fields" to linkedMapOf("qty" to 3)),
+                            linkedMapOf("fields" to linkedMapOf("qty" to 5)),
+                        ),
+                ),
+            )
+        assertEquals(listOf("no"), d.values.keys.toList())
+        val rows = d.details.getValue("order_line")
+        assertEquals(2, rows.size)
+        assertEquals("L1", rows[0].id)
+        assertEquals(DraftValue.Number("3"), rows[0].fields["qty"])
+        assertEquals(null, rows[1].id, "无 id 即新建")
+        assertEquals(setOf("order_line"), d.touchedDetails)
+    }
+
+    @Test
+    fun `details 空数组是合法的清空整表`() {
+        val d = DraftValues.toDraft(null, linkedMapOf<String?, Any?>("order_line" to emptyList<Any?>()))
+        assertTrue(d.details.containsKey("order_line"), "有键＝要碰该子表")
+        assertTrue(d.details.getValue("order_line").isEmpty(), "空数组＝清空该子表")
+    }
+
+    @Test
+    fun `details 缺省即不碰任何子表`() {
+        val d = DraftValues.toDraft(linkedMapOf<String?, Any?>("no" to "P1"), null)
+        assertTrue(d.details.isEmpty())
+        assertTrue(d.touchedDetails.isEmpty())
+    }
+
+    @Test
+    fun `孙级与非法 id 一律拒并逐条报出`() {
+        val ex =
+            assertFailsWith<KnownKteasyException> {
+                DraftValues.toDraft(
+                    null,
+                    linkedMapOf<String?, Any?>(
+                        "order_line" to
+                            listOf(
+                                linkedMapOf("fields" to linkedMapOf("q" to 1), "details" to linkedMapOf("sub" to emptyList<Any>())),
+                                linkedMapOf("id" to 123, "fields" to linkedMapOf("q" to 2)),
+                            ),
+                    ),
+                )
+            }
+        assertTrue(ex.message!!.contains("一层"), "孙级须点名一层限制：${ex.message}")
+        assertTrue(ex.message!!.contains("id"), "非法 id 须报出：${ex.message}")
+    }
 }

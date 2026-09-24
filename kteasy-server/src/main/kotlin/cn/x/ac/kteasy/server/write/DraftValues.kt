@@ -15,6 +15,7 @@
  */
 package cn.x.ac.kteasy.server.write
 
+import cn.x.ac.kteasy.core.write.DetailRow
 import cn.x.ac.kteasy.core.write.DraftValue
 import cn.x.ac.kteasy.core.write.RecordDraft
 import cn.x.ac.kteasy.server.web.TransportErrors
@@ -30,16 +31,38 @@ import cn.x.ac.kteasy.server.web.TransportErrors
  * 边界层重复判会把同一套规则写两遍、迟早分叉。
  */
 object DraftValues {
-    /**
-     * @param fields 请求体里的 `fields` 对象；null＝本次不触碰任何字段（PATCH 语义下合法）
-     * @throws cn.x.ac.kteasy.core.kernel.KnownKteasyException 值形非法（410 `DRAFT_VALUE_SHAPE`，逐条列明）
-     */
+    /** 仅字段（无子项）。[fields] 为 null＝本次不触碰任何字段（PATCH 语义下合法）。 */
     fun toDraft(
         fields: Map<*, *>?,
     ): RecordDraft {
-        if (fields.isNullOrEmpty()) return RecordDraft()
-        val out = LinkedHashMap<String, DraftValue>(fields.size)
         val bad = ArrayList<String>()
+        val values = parseFields(fields, bad)
+        if (bad.isNotEmpty()) throw TransportErrors.draftShape(bad)
+        return RecordDraft(values)
+    }
+
+    /**
+     * 字段 + 子项差量（M1-07 块 2；A1）。[details] 为 null/缺省＝本次不碰任何子表。
+     *
+     * @param details `子对象 api_name → 行数组`；行＝`{id?, fields}`，行内出现 `details`＝孙级，块 2 拒
+     */
+    fun toDraft(
+        fields: Map<*, *>?,
+        details: Map<*, *>?,
+    ): RecordDraft {
+        val bad = ArrayList<String>()
+        val values = parseFields(fields, bad)
+        val parsedDetails = parseDetails(details, bad)
+        if (bad.isNotEmpty()) throw TransportErrors.draftShape(bad)
+        return RecordDraft(values, parsedDetails)
+    }
+
+    private fun parseFields(
+        fields: Map<*, *>?,
+        bad: MutableList<String>,
+    ): Map<String, DraftValue> {
+        if (fields.isNullOrEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, DraftValue>(fields.size)
         fields.forEach { (key, raw) ->
             val api =
                 key as? String ?: run {
@@ -107,7 +130,63 @@ object DraftValues {
                 }
             }
         }
-        if (bad.isNotEmpty()) throw TransportErrors.draftShape(bad)
-        return RecordDraft(out)
+        return out
+    }
+
+    /** 子项差量解析：缺键即不碰（返回空表＝不写子树）；空数组是合法的「清空该子表」。 */
+    private fun parseDetails(
+        details: Map<*, *>?,
+        bad: MutableList<String>,
+    ): Map<String, List<DetailRow>> {
+        if (details.isNullOrEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, List<DetailRow>>()
+        details.forEach { (key, value) ->
+            val childApi =
+                key as? String ?: run {
+                    bad += "details 的子对象名必须是字符串"
+                    return@forEach
+                }
+            if (childApi.isBlank()) {
+                bad += "details 子对象名为空"
+                return@forEach
+            }
+            val rows =
+                value as? List<*> ?: run {
+                    bad += "details[$childApi] 必须是行数组（空数组＝清空该子表）"
+                    return@forEach
+                }
+            val parsed = ArrayList<DetailRow>(rows.size)
+            for (r in rows) {
+                val rm =
+                    r as? Map<*, *> ?: run {
+                        bad += "details[$childApi] 的每条子行必须是对象 {id?, fields}"
+                        continue
+                    }
+                if (rm.containsKey("details")) {
+                    bad += "details[$childApi] 子行内不得再带 details（块 2 只支持一层父子）"
+                    continue
+                }
+                val idRaw = rm["id"]
+                val id =
+                    when (idRaw) {
+                        null -> {
+                            null
+                        }
+
+                        is String -> {
+                            idRaw
+                        }
+
+                        else -> {
+                            bad += "details[$childApi].id 必须是字符串或省略"
+                            continue
+                        }
+                    }
+                val rowFields = parseFields(rm["fields"] as? Map<*, *>, bad)
+                parsed += DetailRow(id, rowFields)
+            }
+            out[childApi] = parsed
+        }
+        return out
     }
 }

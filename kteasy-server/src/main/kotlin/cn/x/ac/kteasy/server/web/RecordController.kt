@@ -124,7 +124,19 @@ class RecordController(
         body: Map<String, Any?>,
     ): ResponseEntity<Map<String, Any?>> {
         val ctx = contextOf(objectApi, intent, id, body)
-        return ResponseEntity.ok(ok(writes.write(ctx, DraftValues.toDraft(fieldsOf(body, intent)))))
+        return ResponseEntity.ok(ok(writes.write(ctx, DraftValues.toDraft(fieldsOf(body, intent), detailsOf(body, intent)))))
+    }
+
+    /** 子项差量（M1-07 块2）：仅 UPSERT 携带；DELETE/RESTORE 带 details 与带 fields 同罪——伪装成删除的顺带改。 */
+    private fun detailsOf(
+        body: Map<String, Any?>,
+        intent: WriteIntent,
+    ): Map<*, *>? {
+        val details = body["details"] as? Map<*, *>
+        if (intent != WriteIntent.UPSERT && !details.isNullOrEmpty()) {
+            throw TransportErrors.draftShape(listOf("${intent.name} 不接受 details 载荷"))
+        }
+        return details
     }
 
     /** DELETE/RESTORE 不接受 `fields`（有即拒——防「顺手改两个字段再删」这种伪装请求悄悄通过）。 */

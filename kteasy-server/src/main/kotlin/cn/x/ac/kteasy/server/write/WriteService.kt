@@ -18,12 +18,14 @@ package cn.x.ac.kteasy.server.write
 import cn.x.ac.kteasy.core.kernel.ApiError
 import cn.x.ac.kteasy.core.kernel.KnownKteasyException
 import cn.x.ac.kteasy.core.kernel.Ulid
+import cn.x.ac.kteasy.core.meta.MdField
 import cn.x.ac.kteasy.core.schema.SchemaDiff
 import cn.x.ac.kteasy.core.schema.dialect.LockKey
 import cn.x.ac.kteasy.core.schema.dialect.LogicalArea
 import cn.x.ac.kteasy.core.schema.dialect.SchemaProvider
 import cn.x.ac.kteasy.core.write.DetailDiffer
 import cn.x.ac.kteasy.core.write.DetailRow
+import cn.x.ac.kteasy.core.write.DraftValue
 import cn.x.ac.kteasy.core.write.ExtCodec
 import cn.x.ac.kteasy.core.write.InternalWriteSources
 import cn.x.ac.kteasy.core.write.RecordDraft
@@ -38,6 +40,7 @@ import cn.x.ac.kteasy.core.write.WriteLocks
 import cn.x.ac.kteasy.core.write.WritePipeline
 import cn.x.ac.kteasy.core.write.WritePlan
 import cn.x.ac.kteasy.core.write.WriteResult
+import cn.x.ac.kteasy.core.write.WriteSource
 import cn.x.ac.kteasy.core.write.WriteSqlRenderer
 import cn.x.ac.kteasy.server.md.MetadataGraphCache
 import org.slf4j.LoggerFactory
@@ -103,8 +106,13 @@ class WriteService(
             val pKey = ctx.recordId?.let { WriteLocks.of(pgraph.objectMeta.id, it) }
             pKey?.let { acquire(it) }
             try {
+                val seeds = ArrayList<Pair<String, String>>()
                 val parent = writeLocked(ctx, pgraph, draft.copy(details = emptyMap()))
-                if (draft.details.isNotEmpty()) writeChildren(ctx, parent.id, draft.details)
+                if (parent.diff.isNotEmpty()) seeds += ctx.objectApi to parent.id
+                if (draft.details.isNotEmpty()) seeds += writeChildren(ctx, parent.id, draft.details)
+                // recalc 只在最外层用户写触发（内部再写 recalcDepth>0 不再递归，由本迭代逐层驱动）；
+                // 仍在父锁与同一事务内，保证汇总与源写原子一致。
+                if (ctx.recalcDepth == 0) recalcPass(ctx, seeds)
                 parent
             } finally {
                 pKey?.let { release(it) }
@@ -112,12 +120,13 @@ class WriteService(
         } ?: throw KnownKteasyException(ApiError.INTERNAL, "写事务未返回结果")
     }
 
-    /** 子对象按 api 字典序；每子对象内既有行操作按 id 升序、新建其后（各自 doWrite 取放子行锁，父锁已在上层持有）。 */
+    /** 子对象按 api 字典序；每子对象内既有行操作按 id 升序、新建其后。返回真发生变更的 (objectApi, recordId) 供 recalc 种子。 */
     private fun writeChildren(
         ctx: WriteContext,
         parentId: String,
         details: Map<String, List<DetailRow>>,
-    ) {
+    ): List<Pair<String, String>> {
+        val changed = ArrayList<Pair<String, String>>()
         for ((childApi, rows) in details.entries.sortedBy { it.key }) {
             val existing = existingChildIds(childApi, parentId)
             val diff = DetailDiffer.diff(childApi, rows, existing)
@@ -125,19 +134,98 @@ class WriteService(
             val deleteIds = diff.deletes.toSet()
             for (id in (updateById.keys + deleteIds).sorted()) {
                 val childCtx = ctx.copy(objectApi = childApi, parentId = parentId, recordId = id, intent = if (id in deleteIds) WriteIntent.DELETE else WriteIntent.UPSERT, expectedVersion = null)
-                doWrite(childCtx, updateById[id]?.let { RecordDraft(it.fields) } ?: RecordDraft())
+                val r = doWrite(childCtx, updateById[id]?.let { RecordDraft(it.fields) } ?: RecordDraft())
+                if (r.diff.isNotEmpty() || id in deleteIds) changed += childApi to id
             }
             for (r in diff.creates) {
                 val childCtx = ctx.copy(objectApi = childApi, parentId = parentId, recordId = null, intent = WriteIntent.UPSERT, expectedVersion = null)
-                doWrite(childCtx, RecordDraft(r.fields))
+                val res = doWrite(childCtx, RecordDraft(r.fields))
+                changed += childApi to res.id
             }
         }
+        return changed
     }
 
     private fun existingChildIds(
         childApi: String,
         parentId: String,
     ): Set<String> = jdbc.queryForList(renderer.childIdsSql(childApi), MapSqlParameterSource(mapOf("__pid" to parentId)), String::class.java).map { it!! }.toSet()
+
+    /**
+     * recalc（M1-07 块4）：沿父链逐层重算汇总字段。种子＝本层"真变更"的记录 `(objectApi, recordId)`。
+     *
+     * 每层把各源对象的 `depIn` 边（本对象被父对象聚合）折算成"目标父记录 + 目标字段 + 聚合查询"，
+     * **按目标记录 id 升序**逐条经 [doWrite]（`SYSTEM` 来源、`recalcDepth+1`）写回——写回复用整条写通道
+     * （锁/row_version/diff/事件），目标字段值一致则 diff 空、自然不写也不进下一层，从而终止。
+     * 深度超 [RECALC_MAX_DEPTH] 即停并告警（防脏图失控；保存期已做环检测，这里是运行期兜底）。
+     */
+    private fun recalcPass(
+        ctx: WriteContext,
+        seeds: List<Pair<String, String>>,
+    ) {
+        var frontier = seeds.distinct()
+        var depth = 0
+        while (frontier.isNotEmpty()) {
+            if (depth >= RECALC_MAX_DEPTH) {
+                log.warn("recalc 超深度上限 {}，中止剩余 {} 条链上溯 trace={}", RECALC_MAX_DEPTH, frontier.size, ctx.traceId)
+                return
+            }
+            depth++
+            // 收集本层待算：键 (目标对象api, 目标记录id, 目标字段api) → 聚合 SQL 描述
+            val jobs = LinkedHashMap<Triple<String, String, String>, RecalcJob>()
+            for ((objApi, recId) in frontier) {
+                val (_, graph) = cache.graph(objApi)
+                val parentApi = graph.parent?.apiName ?: continue
+                val (_, pgraph) = cache.graph(parentApi)
+                val targetFieldByParent = pgraph.fields.associateBy { it.id }
+                val sourceFieldById = graph.fields.associateBy { it.id }
+                val pid = readParentId(objApi, recId) ?: continue
+                for (edge in graph.depIn) {
+                    val srcField = sourceFieldById[edge.sourceFieldId] ?: continue
+                    val targetField = targetFieldByParent[edge.targetFieldId] ?: continue
+                    jobs[Triple(parentApi, pid, targetField.apiName)] = RecalcJob(parentApi, targetField.apiName, objApi, srcField, edge.op, pid, edge.id)
+                }
+            }
+            if (jobs.isEmpty()) return
+            val next = ArrayList<Pair<String, String>>()
+            for (job in jobs.values.sortedWith(compareBy({ it.targetRecordId }, { it.targetFieldApi }))) {
+                val sql = renderer.aggregateSql(job.sourceObjectApi, job.sourceField, job.op, "parent_id")
+                val agg = jdbc.queryForObject(sql, MapSqlParameterSource(mapOf("__pid" to job.targetRecordId)), java.math.BigDecimal::class.java)
+                val draft =
+                    if (agg == null) {
+                        RecordDraft(values = mapOf(job.targetFieldApi to DraftValue.Cleared))
+                    } else {
+                        RecordDraft(values = mapOf(job.targetFieldApi to DraftValue.Number(agg.toPlainString())))
+                    }
+                val targetCtx = ctx.copy(objectApi = job.targetObjectApi, recordId = job.targetRecordId, intent = WriteIntent.UPSERT, source = WriteSource.SYSTEM, expectedVersion = null, parentId = null, recalcDepth = depth)
+                val r = doWrite(targetCtx, draft)
+                if (r.diff.isNotEmpty()) next += job.targetObjectApi to job.targetRecordId
+            }
+            frontier = next
+        }
+    }
+
+    private fun readParentId(
+        objectApi: String,
+        recordId: String,
+    ): String? =
+        runCatching {
+            jdbc.queryForObject(
+                "SELECT parent_id FROM ${provider.namespace.qualified(LogicalArea.ENTITY, objectApi)} WHERE id = :__id",
+                MapSqlParameterSource(mapOf("__id" to recordId)),
+                String::class.java,
+            )
+        }.getOrNull()
+
+    private data class RecalcJob(
+        val targetObjectApi: String,
+        val targetFieldApi: String,
+        val sourceObjectApi: String,
+        val sourceField: MdField,
+        val op: cn.x.ac.kteasy.core.meta.DepAggOp,
+        val targetRecordId: String,
+        val edgeId: String,
+    )
 
     /**
      * N2N 关联集合差量落 `r_` 表（块 3A）。在主机记录写锁内、与主写同事务调用（`writeLocked` 落库后）。
@@ -322,6 +410,7 @@ class WriteService(
 
     private companion object {
         const val LOCK_TIMEOUT_SECONDS = 5
+        const val RECALC_MAX_DEPTH = 5
         const val SYSTEM_COL_ID = "id"
         const val SYSTEM_COL_CREATED_AT = "created_at"
         const val SYSTEM_COL_CREATED_BY = "created_by"

@@ -218,6 +218,49 @@ object MetadataValidator {
      * 该列只允许字符串数组，容错解析足以支撑校验；结构化消费归 M1-04/M1-05 的注册表与 EQL 层。
      * 非 JSON 数组形状返回 null（视为未填）。
      */
+    /**
+     * recalc 依赖图环检测（M1-07 块4 单元②；卡面 §3「有环拒存」、图纸 01 §39 保存校验链一环）。
+     *
+     * 节点＝字段 id，"depends-on" 有向边 `target ← source`（目标字段聚合自来源字段）。DFS 三色找环，
+     * 返回成人话违规（含环路径，供治理面 420 `data.violations[]`）；无环返回空。**纯函数、零 IO**。
+     * 元数据保存走 `badRequest(List<String>)`（420 + 人话列表），故这里不产符号名、不动 `WriteErrors.ALL_IDS`。
+     */
+    fun checkDependencyCycle(deps: List<MdDep>): List<String> {
+        // 邻接：字段 → 它依赖的来源字段集合。
+        val depends = HashMap<String, MutableList<String>>()
+        val nodes = HashSet<String>()
+        for (d in deps) {
+            nodes += d.targetFieldId
+            nodes += d.sourceFieldId
+            depends.getOrPut(d.targetFieldId) { mutableListOf() } += d.sourceFieldId
+        }
+        val color = HashMap<String, Int>() // 0/缺省=白 1=灰(在栈) 2=黑(完成)
+        val cycles = ArrayList<String>()
+
+        fun dfs(
+            node: String,
+            path: MutableList<String>,
+        ) {
+            val state = color.getOrDefault(node, 0)
+            if (state == 2) return
+            if (state == 1) {
+                // 回边到栈内节点 → 截出环路径。
+                val at = path.indexOf(node)
+                val ring = if (at >= 0) path.subList(at, path.size).toList() + node else path.toList() + node
+                cycles += "聚合依赖成环：${ring.joinToString(" → ")}"
+                return
+            }
+            color[node] = 1
+            path += node
+            for (next in depends[node].orEmpty()) dfs(next, path)
+            path.removeAt(path.size - 1)
+            color[node] = 2
+        }
+
+        nodes.forEach { if (color.getOrDefault(it, 0) == 0) dfs(it, ArrayList()) }
+        return cycles
+    }
+
     fun parseStringArray(raw: String?): List<String>? {
         if (raw.isNullOrBlank()) return null
         val s = raw.trim()

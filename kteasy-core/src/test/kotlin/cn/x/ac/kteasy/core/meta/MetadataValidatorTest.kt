@@ -300,4 +300,34 @@ class MetadataValidatorTest {
         assertEquals(null, MetadataValidator.parseStringArray(null))
         assertEquals(null, MetadataValidator.parseStringArray(""))
     }
+
+    private fun dep(
+        target: String,
+        source: String,
+    ) = MdDep(id = "$target-$source", targetFieldId = target, sourceObjectId = "OBJ", sourceFieldId = source, op = DepAggOp.SUM)
+
+    @Test
+    fun `聚合依赖 DAG 无环通过`() {
+        // total←qty, tax←qty, grand←(total,tax)：菱形但无环。
+        val deps = listOf(dep("total", "qty"), dep("tax", "qty"), dep("grand", "total"), dep("grand", "tax"))
+        assertEquals(emptyList<String>(), MetadataValidator.checkDependencyCycle(deps))
+    }
+
+    @Test
+    fun `二元环 A 依赖 B 且 B 依赖 A 被拒`() {
+        val v = MetadataValidator.checkDependencyCycle(listOf(dep("A", "B"), dep("B", "A")))
+        assertEquals(1, v.size)
+        assertTrue(v[0].contains("成环"), "应成人话环路径：${v[0]}")
+    }
+
+    @Test
+    fun `自环被拒`() {
+        val v = MetadataValidator.checkDependencyCycle(listOf(dep("X", "X")))
+        assertTrue(v.isNotEmpty() && v[0].contains("成环"), "自环亦须拒：$v")
+    }
+
+    @Test
+    fun `空依赖表无环`() {
+        assertEquals(emptyList<String>(), MetadataValidator.checkDependencyCycle(emptyList()))
+    }
 }

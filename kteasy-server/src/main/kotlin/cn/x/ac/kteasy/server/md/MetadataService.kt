@@ -20,6 +20,7 @@ import cn.x.ac.kteasy.core.kernel.KnownKteasyException
 import cn.x.ac.kteasy.core.kernel.MetadataAction
 import cn.x.ac.kteasy.core.kernel.MetadataChangedEvent
 import cn.x.ac.kteasy.core.kernel.Ulid
+import cn.x.ac.kteasy.core.meta.DepAggOp
 import cn.x.ac.kteasy.core.meta.FieldWritePolicy
 import cn.x.ac.kteasy.core.meta.LogicalType
 import cn.x.ac.kteasy.core.meta.MdDep
@@ -53,6 +54,14 @@ class MetadataService(
 
     // ---------- 命令载体 ----------
 
+    /** rollup 声明（M1-07 块4 A4）：把某目标字段声明为"对来源对象关联记录按算子聚合"，保存时静态解析写 `md_dep`。 */
+    data class RollupCmd(
+        val sourceObjectApi: String,
+        val sourceFieldApi: String,
+        val op: String,
+        val filterJson: String? = null,
+    )
+
     data class FieldCmd(
         val apiName: String,
         val label: String,
@@ -74,6 +83,8 @@ class MetadataService(
         val writePolicy: String? = null,
         /** 必填作用域（ALWAYS/CREATE/UPDATE），仅当 [required]=true 有意义。null＝缺省 ALWAYS。 */
         val requiredScope: String? = null,
+        /** rollup 聚合声明（M1-07 块4）；非空 ⇒ 该字段写策略强制 `DERIVED`（服务端 recalc 维护，调用方不可填）。 */
+        val rollup: RollupCmd? = null,
     )
 
     data class ObjectCreateCmd(
@@ -140,6 +151,8 @@ class MetadataService(
             throwOnViolations(violations)
             repository.insertObject(obj)
             fields.forEach { repository.insertField(it) }
+            // rollup 声明随对象创建一并落边 + 环检测（cmd.fields 与 built fields 同序）。
+            cmd.fields.zip(fields).forEach { (fc, f) -> fc.rollup?.let { persistRollup(f, it) } }
             repository.findObjectByApi(cmd.apiName)!!
         }
 
@@ -228,8 +241,32 @@ class MetadataService(
             val field = buildField(obj.id, cmd, fields = repository.listFieldsByObjectId(obj.id))
             throwOnViolations(MetadataValidator.checkField(field))
             repository.insertField(field)
+            cmd.rollup?.let { persistRollup(field, it) }
             repository.findFieldByApi(obj.id, cmd.apiName)!!
         }
+
+    /**
+     * rollup 声明落 `md_dep` + 保存期环检测（M1-07 块4 单元④）。在 `mdWrite` 事务内调用——
+     * 环或来源缺失即 `throwOnViolations` 回滚，边与字段原子生效。有环＝420 人话违规（不动 `WriteErrors.ALL_IDS`）。
+     */
+    private fun persistRollup(
+        targetField: MdField,
+        rollup: RollupCmd,
+    ) {
+        val op =
+            runCatching { DepAggOp.valueOf(rollup.op.uppercase()) }.getOrElse {
+                throw badRequest(listOf("rollup 算子 [${rollup.op}] 非法（允许 ${DepAggOp.values().joinToString()}）"))
+            }
+        val srcObj =
+            repository.findObjectByApi(rollup.sourceObjectApi)
+                ?: throw badRequest(listOf("rollup 来源对象 [${rollup.sourceObjectApi}] 不存在"))
+        val srcField =
+            repository.findFieldByApi(srcObj.id, rollup.sourceFieldApi)
+                ?: throw badRequest(listOf("rollup 来源字段 [${rollup.sourceObjectApi}.${rollup.sourceFieldApi}] 不存在"))
+        val dep = MdDep(id = Ulid.next(), targetFieldId = targetField.id, sourceObjectId = srcObj.id, sourceFieldId = srcField.id, op = op, filterJson = rollup.filterJson)
+        throwOnViolations(MetadataValidator.checkDependencyCycle(repository.listAllDeps() + dep))
+        repository.insertDep(dep)
+    }
 
     fun updateField(
         objectApi: String,
@@ -365,7 +402,7 @@ class MetadataService(
                     throw badRequest(listOf("字段 [${cmd.apiName}] storage_kind [$it] 非法（EXT/COLUMN/N2N）"))
                 }
             } ?: type.storage
-        val policy = parseWritePolicy(cmd.apiName, cmd.writePolicy)
+        val policy = if (cmd.rollup != null) FieldWritePolicy.DERIVED else parseWritePolicy(cmd.apiName, cmd.writePolicy)
         val scope = parseRequiredScope(cmd.apiName, cmd.requiredScope)
         val refObjectId =
             cmd.refObjectApi?.let { api ->

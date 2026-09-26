@@ -177,6 +177,38 @@ class RecalcIT {
     }
 
     @Test
+    fun `治理面 createField 声明 rollup 落 md_dep 并驱动 recalc`() {
+        // 单元④路径：不直插 md_dep，改用 createField + RollupCmd 在既有 custApi 上加"ordercount ← COUNT(ordApi.amount)"
+        // 声明（Order 元数据父就是 custApi，链路合法）。保存后写订单，recalc 应命中声明边并回写。
+        val newFieldApi = "ordercount_$sfx"
+        meta.createField(
+            custApi,
+            MetadataService.FieldCmd(
+                apiName = newFieldApi,
+                label = "订单数",
+                logicalType = "NUMBER",
+                rollup = MetadataService.RollupCmd(sourceObjectApi = ordApi, sourceFieldApi = "amount", op = "COUNT"),
+            ),
+        )
+        val depCount =
+            jdbc().queryForObject(
+                "SELECT count(*) FROM ${provider.namespace.qualified(LogicalArea.METADATA, "md_dep")} d " +
+                    "JOIN ${provider.namespace.qualified(LogicalArea.METADATA, "md_field")} f ON d.target_field_id = f.id " +
+                    "JOIN ${provider.namespace.qualified(LogicalArea.METADATA, "md_object")} o ON f.object_id = o.id " +
+                    "WHERE o.api_name = ? AND f.api_name = ?",
+                Int::class.java,
+                custApi,
+                newFieldApi,
+            )
+        assertThat(depCount).`as`("createField+RollupCmd 应写一条 md_dep 边").isEqualTo(1)
+        val cust = writes.write(ctx(custApi), RecordDraft(values = mapOf("name" to DraftValue.Text("CNT-$sfx")))).id
+        writes.write(ctx(ordApi).copy(parentId = cust), RecordDraft(values = mapOf("amount" to DraftValue.Number("3"))))
+        writes.write(ctx(ordApi).copy(parentId = cust), RecordDraft(values = mapOf("amount" to DraftValue.Number("5"))))
+        val ext = jdbc().queryForObject("SELECT ext FROM $custTable WHERE id = ?", String::class.java, cust).toString()
+        assertThat(ext).`as`("recalc 命中声明边、回写 $newFieldApi=2：$ext").contains(newFieldApi)
+    }
+
+    @Test
     fun `并发多子写两父汇总无死锁终值正确`() {
         // 2 父 × 各 3 子（对齐卡面"两父交叉改"摊薄单锁竞争）。并发写同一父的汇总锁经 recalc 串行；
         // advisory 锁是"等待超时"非 DB 死锁 → 遇 420 LOCK_RETRY 重试即可，终值应各 =7+7+7=21。

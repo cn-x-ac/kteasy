@@ -372,6 +372,21 @@ class MetadataRepository(
             )
         }
 
+    /** 落一条 recalc 依赖边（rollup 声明保存时；filter_json 走方言 JSON 绑定）。 */
+    fun insertDep(d: MdDep) {
+        jdbc.update(
+            "INSERT INTO ${table("md_dep")} (id, target_field_id, source_object_id, source_field_id, op, filter_json) " +
+                "VALUES (:id, :t, :so, :sf, :op, ${jsonPh("filter_json")})",
+            MapSqlParameterSource()
+                .addValue("id", d.id)
+                .addValue("t", d.targetFieldId)
+                .addValue("so", d.sourceObjectId)
+                .addValue("sf", d.sourceFieldId)
+                .addValue("op", d.op.name)
+                .addValue("filter_json", d.filterJson),
+        )
+    }
+
     fun findDictById(id: String): MdDict? =
         queryOne(
             "SELECT id, name FROM ${table("md_dict")} WHERE id = :id",

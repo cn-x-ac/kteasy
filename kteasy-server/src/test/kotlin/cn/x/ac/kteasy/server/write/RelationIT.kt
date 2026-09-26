@@ -88,14 +88,20 @@ class RelationIT {
     fun setup() {
         meta.createObject(
             MetadataService.ObjectCreateCmd(
-                apiName = targetApi, label = "标签", kind = "PLAIN", displayName = "{name}",
+                apiName = targetApi,
+                label = "标签",
+                kind = "PLAIN",
+                displayName = "{name}",
                 fields = listOf(MetadataService.FieldCmd("name", "名称", "TEXT", required = true)),
             ),
         )
         awaitTable(LogicalArea.ENTITY, targetApi)
         meta.createObject(
             MetadataService.ObjectCreateCmd(
-                apiName = hostApi, label = "单据", kind = "PARENT", displayName = "{code}",
+                apiName = hostApi,
+                label = "单据",
+                kind = "PARENT",
+                displayName = "{code}",
                 fields =
                     listOf(
                         MetadataService.FieldCmd("code", "编码", "TEXT", required = true),
@@ -135,8 +141,7 @@ class RelationIT {
     }
 
     /** 该主机记录当前关联的目标 id 集。 */
-    private fun linked(hostId: String): Set<String> =
-        jdbc().queryForList("SELECT $dstCol FROM $relTable WHERE $srcCol = ?", String::class.java, hostId).map { it!! }.toSet()
+    private fun linked(hostId: String): Set<String> = jdbc().queryForList("SELECT $dstCol FROM $relTable WHERE $srcCol = ?", String::class.java, hostId).map { it!! }.toSet()
 
     @Test
     fun `写关联集合可增删且保留行 ext 不丢`() {

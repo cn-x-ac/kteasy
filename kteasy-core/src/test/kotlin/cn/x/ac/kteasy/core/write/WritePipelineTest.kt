@@ -210,13 +210,20 @@ class WritePipelineTest {
     }
 
     @Test
-    fun `停用字段与多引用字段分别给出可诊断的符号名`() {
+    fun `停用字段拒 多引用改后透传目标集不落列`() {
         val g = graphOf(field("legacy", LogicalType.TEXT, enabled = false), field("links", LogicalType.N2N))
         val e1 = rejected(WriteInput(g, ctxOf(), RecordDraft.of("legacy" to DraftValue.Text("x"))))
         assertEquals(WriteErrors.ID_FIELD_DISABLED, ((e1.data as Map<*, *>)["fields"] as List<*>).let { (it[0] as Map<*, *>)["error_id"] })
-        val e2 = rejected(WriteInput(g, ctxOf(), RecordDraft.of("links" to DraftValue.Many(listOf("R1")))))
-        assertEquals(WriteErrors.ID_FIELD_READONLY, ((e2.data as Map<*, *>)["fields"] as List<*>).let { (it[0] as Map<*, *>)["error_id"] })
-        assertTrue(e2.message!!.contains("M1-07"), "多引用留桩要在人话里点名归属，避免被当成 bug")
+
+        // 块 3A：N2N 不再按只读拒，载荷目标集透传进 relationTargets，且不进 ext/列（差量在执行层落 r_ 表）。
+        val plan = plan(WriteInput(g, ctxOf(), RecordDraft.of("links" to DraftValue.Many(listOf("R1", "R2", "R1")))))
+        assertEquals(mapOf("links" to listOf("R1", "R2")), plan.relationTargets, "去重保序")
+        assertEquals(null, plan.extValues["links"])
+        assertEquals(null, plan.columnBindings["links"])
+
+        // 值形非法（布尔）→ FIELD_TYPE
+        val bad = rejected(WriteInput(g, ctxOf(), RecordDraft.of("links" to DraftValue.Bool(true))))
+        assertEquals(WriteErrors.ID_FIELD_TYPE, ((bad.data as Map<*, *>)["fields"] as List<*>).let { (it[0] as Map<*, *>)["error_id"] })
     }
 
     @Test

@@ -118,6 +118,32 @@ class WriteSqlRenderer(
         objectApi: String,
     ): String = "SELECT id FROM " + table(objectApi) + " WHERE parent_id = :__pid AND deleted_at IS NULL ORDER BY id"
 
+    // ---------- N2N 关联（r_ 表）集合差量（M1-07 块 3A） ----------
+    // 表/列名由调用方（执行层）从 SchemaDiff 命名口 + 快照解析后传入，与物化、查询侧完全同源；
+    // 这里只拼最普通的 SELECT/INSERT/DELETE，无方言分叉。附加列 ext 不在写路径显式给（新建行 ext 为空，
+    // 保留行整体不碰 → 其 ext 天然存活，正是卡面红线）。
+
+    /** 读某主机记录在关联表上现存的目标 id 集。占位符 `:__src`。 */
+    fun relationTargetsSql(
+        relTable: String,
+        srcCol: String,
+        dstCol: String,
+    ): String = "SELECT $dstCol FROM $relTable WHERE $srcCol = :__src"
+
+    /** 新增一条关联行（id/源/宿；ext 留空）。 */
+    fun relationInsertSql(
+        relTable: String,
+        srcCol: String,
+        dstCol: String,
+    ): String = "INSERT INTO $relTable (id, $srcCol, $dstCol) VALUES (:__id, :__src, :__dst)"
+
+    /** 按 (源, 宿∈集合) 物理删除关联行（连接表无墓碑列，删即删）。 */
+    fun relationDeleteSql(
+        relTable: String,
+        srcCol: String,
+        dstCol: String,
+    ): String = "DELETE FROM $relTable WHERE $srcCol = :__src AND $dstCol IN (:__dsts)"
+
     /**
      * 参数名与 SQL 里的占位符一一对应：普通列为 `:v_<列名>`，`ext` 例外——它要经
      * `provider.json.bindJson("ext")` 生成方言绑定片段，占位符名由方言侧决定，故这里也必须叫 `ext`。

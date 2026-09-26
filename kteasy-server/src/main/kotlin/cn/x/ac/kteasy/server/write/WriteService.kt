@@ -18,13 +18,16 @@ package cn.x.ac.kteasy.server.write
 import cn.x.ac.kteasy.core.kernel.ApiError
 import cn.x.ac.kteasy.core.kernel.KnownKteasyException
 import cn.x.ac.kteasy.core.kernel.Ulid
+import cn.x.ac.kteasy.core.schema.SchemaDiff
 import cn.x.ac.kteasy.core.schema.dialect.LockKey
+import cn.x.ac.kteasy.core.schema.dialect.LogicalArea
 import cn.x.ac.kteasy.core.schema.dialect.SchemaProvider
 import cn.x.ac.kteasy.core.write.DetailDiffer
 import cn.x.ac.kteasy.core.write.DetailRow
 import cn.x.ac.kteasy.core.write.ExtCodec
 import cn.x.ac.kteasy.core.write.InternalWriteSources
 import cn.x.ac.kteasy.core.write.RecordDraft
+import cn.x.ac.kteasy.core.write.RelationDiffer
 import cn.x.ac.kteasy.core.write.WriteCommittedEvent
 import cn.x.ac.kteasy.core.write.WriteContext
 import cn.x.ac.kteasy.core.write.WriteErrors
@@ -137,6 +140,51 @@ class WriteService(
     ): Set<String> = jdbc.queryForList(renderer.childIdsSql(childApi), MapSqlParameterSource(mapOf("__pid" to parentId)), String::class.java).map { it!! }.toSet()
 
     /**
+     * N2N 关联集合差量落 `r_` 表（块 3A）。在主机记录写锁内、与主写同事务调用（`writeLocked` 落库后）。
+     *
+     * 现存目标集从 `r_` 表读（管道零 IO 看不到），[RelationDiffer] 算加/删/保留；
+     * **保留行整行不碰**（不重插、不改）→ 其 `ext` 附加列天然存活（卡面红线：更新关联绝不丢未变行附加列）；
+     * 删＝按 (源,宿) 物理删连接行（`r_` 表无 `deleted_at` 列，删即删）；加＝插新行（ext 留空）。
+     */
+    private fun applyRelations(
+        graph: cn.x.ac.kteasy.core.meta.MetadataGraph,
+        plan: WritePlan,
+    ) {
+        if (plan.relationTargets.isEmpty()) return
+        val hostApi = graph.objectMeta.apiName
+        val hostId = plan.id
+        val objects = cache.snapshot().objects
+        for ((fieldApi, targetIds) in plan.relationTargets) {
+            val field = graph.fields.first { it.apiName == fieldApi }
+            val targetApi = field.refObjectId?.let { rid -> objects.firstOrNull { it.id == rid }?.apiName }
+            val relTable = provider.namespace.qualified(LogicalArea.RELATION, SchemaDiff.relationTableLogicalName(graph.objectMeta, field))
+            val srcCol = SchemaDiff.relationSourceColumn(hostApi)
+            val dstCol = SchemaDiff.relationTargetColumn(targetApi)
+            val existing =
+                jdbc
+                    .queryForList(
+                        renderer.relationTargetsSql(relTable, srcCol, dstCol),
+                        MapSqlParameterSource(mapOf("__src" to hostId)),
+                        String::class.java,
+                    ).map { it!! }
+                    .toSet()
+            val diff = RelationDiffer.diff(targetIds, existing)
+            for (dst in diff.toAdd) {
+                jdbc.update(
+                    renderer.relationInsertSql(relTable, srcCol, dstCol),
+                    MapSqlParameterSource(mapOf("__id" to Ulid.next(), "__src" to hostId, "__dst" to dst)),
+                )
+            }
+            if (diff.toRemove.isNotEmpty()) {
+                jdbc.update(
+                    renderer.relationDeleteSql(relTable, srcCol, dstCol),
+                    MapSqlParameterSource(mapOf("__src" to hostId, "__dsts" to diff.toRemove)),
+                )
+            }
+        }
+    }
+
+    /**
      * 批量写＝循环单条、**各自事务**（卡面 §6 默认）。一条失败不回滚整批——
      * M4-02 导入的逐行状态可见性依赖这一点。
      */
@@ -188,7 +236,7 @@ class WriteService(
         // 若把空 diff 也写成一次变更，每次整单保存都会制造一条假变更与一轮级联触发。
         // 条件刻意包含 UPDATED：软删/恢复的变化落在 deleted_at、不进 diff，
         // 只按「diff 为空」判跳过会把删除误判成无变化（块 5 双库 IT 第一次跑就抓到）。
-        if (plan.kind == WriteKind.UPDATED && plan.diff.isEmpty()) {
+        if (plan.kind == WriteKind.UPDATED && plan.diff.isEmpty() && plan.relationTargets.isEmpty()) {
             log.debug("无变化，跳过写入 object={} id={} 版本={}", ctx.objectApi, plan.id, plan.expectedVersion)
             return WriteResult(plan.id, plan.expectedVersion, plan.kind, emptyMap(), plan.warnings)
         }
@@ -197,6 +245,8 @@ class WriteService(
         if (plan.kind == WriteKind.UPDATED && affected == 0) {
             throw WriteErrors.conflictRetry(plan.id, plan.expectedVersion, existing?.rowVersion ?: -1L)
         }
+        // 主机行已在（新建刚 INSERT、更新已 UPDATE），且本记录写锁在手 → 关联集合差量与主写同事务、同锁保护。
+        applyRelations(graph, plan)
         publisher.publishEvent(
             WriteCommittedEvent(
                 eventId = Ulid.next(),

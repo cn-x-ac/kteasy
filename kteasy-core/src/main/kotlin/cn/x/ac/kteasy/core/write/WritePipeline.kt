@@ -73,6 +73,8 @@ data class WritePlan(
     val expectedVersion: Long,
     val rowVersionNext: Long,
     val touchedFields: Set<String>,
+    /** 触碰到的 N2N 字段 → 载荷目标 id 集（去重保序）。空＝本次不碰该关联（执行层据此算集合差落 r_ 表）。 */
+    val relationTargets: Map<String, List<String>> = emptyMap(),
 )
 
 /**
@@ -113,6 +115,7 @@ class WritePipeline(
         val fields = input.graph.fields.associateBy { it.apiName }
         val creating = located.creating
         val accepted = LinkedHashMap<String, DraftValue>()
+        val relationTargets = LinkedHashMap<String, List<String>>()
         val early = ArrayList<WriteErrors.FieldViolation>()
 
         // ---- 阶段 4（键与档位）+ 阶段 3（形状/类型/域）：先收集、一次抛，避免客户端改一处报一处 ----
@@ -122,6 +125,17 @@ class WritePipeline(
                 continue
             }
             val field = fields.getValue(api)
+            // N2N（块 3A）：载荷＝目标记录 id 列表；管道零 IO 算不了 r_ 表现存集，只校值形并透传目标集，
+            // 三集差量（加/删/保留）在执行层持主机行锁时落 r_ 表。不进 accepted/ext/列。
+            if (field.logicalType == LogicalType.N2N) {
+                val targets = n2nTargetIds(raw)
+                if (targets == null) {
+                    early += WriteErrors.violation(api, WriteErrors.ID_FIELD_TYPE, "字段 [$api] 是多引用，值须为目标 id 数组或单个 id 串")
+                } else {
+                    relationTargets[api] = targets
+                }
+                continue
+            }
             val shaped =
                 shapeOf(field, raw) ?: run {
                     early += WriteErrors.violation(api, WriteErrors.ID_FIELD_TYPE, "字段 [$api] 值形态与类型 ${field.logicalType.name} 不符")
@@ -261,6 +275,7 @@ class WritePipeline(
             expectedVersion = expected,
             rowVersionNext = next,
             touchedFields = input.draft.touchedFields,
+            relationTargets = relationTargets,
         )
     }
 
@@ -327,10 +342,7 @@ class WritePipeline(
             field
                 ?: return WriteErrors.violation(api, WriteErrors.ID_EXT_UNKNOWN_KEY, "对象上没有名为 [$api] 的字段（未注册键一律拒收，宽容性在上游清洗器）")
         if (!f.enabled) return WriteErrors.violation(api, WriteErrors.ID_FIELD_DISABLED, "字段 [$api] 已停用，不接受写入")
-        if (f.logicalType == LogicalType.N2N) {
-            // 留桩位（M1-07）：多引用差量写入未实现，先按只读拒，绝不静默丢值——静默丢值会让调用方以为写成了。
-            return WriteErrors.violation(api, WriteErrors.ID_FIELD_READONLY, "字段 [$api] 是多引用，其差量写入归 M1-07；本通道暂不接受")
-        }
+        // N2N 不在此拒（块 3A 已实装集合差量写）：其载荷值形校验与目标集透传在 plan 主循环里单独处理。
         // 档位判定。NO_UPDATE 不在此拒——交给调用点做「同值即不触碰」豁免（见 plan 的阶段 4 注释）；
         // 其余档位（元数据只读、自动化下发位、禁新建）一律硬拒，且对任何来源都成立（P3）。
         val blockedByPolicy =
@@ -354,6 +366,24 @@ class WritePipeline(
             return WriteErrors.violation(api, WriteErrors.ID_FIELD_READONLY, "字段 [$api] 是自动编号，只能由服务端取号生成")
         }
         return null
+    }
+
+    /** N2N 载荷值形归一：接受 `Many`（目标 id 列表）或单个 `Text`（一个 id）；去空、去重、保序。非法返回 null。 */
+    private fun n2nTargetIds(
+        raw: DraftValue,
+    ): List<String>? {
+        val items =
+            when (raw) {
+                is DraftValue.Many -> raw.items
+                is DraftValue.Text -> listOf(raw.value)
+                else -> return null
+            }
+        val clean = LinkedHashSet<String>()
+        for (id in items) {
+            if (id.isBlank()) return null
+            clean += id
+        }
+        return clean.toList()
     }
 
     /** 值形态归一（不做内容校验）：多值型接受单值串，标量型拒绝数组。 */
@@ -536,6 +566,8 @@ class WritePipeline(
         val missing = ArrayList<WriteErrors.FieldViolation>()
         for (f in input.graph.fields) {
             if (!f.enabled || !f.isRequiredOn(creating)) continue
+            // N2N 的"必填"＝关联至少一条，其存在性在 r_ 表侧、管道看不到载荷是否清空集，本块先不裁决（留桩）。
+            if (f.logicalType == LogicalType.N2N) continue
             val submitted = derived[f.apiName]
             if (submitted != null && submitted !is DraftValue.Cleared) continue
             if (!creating && input.existing?.values?.get(f.apiName) != null) continue

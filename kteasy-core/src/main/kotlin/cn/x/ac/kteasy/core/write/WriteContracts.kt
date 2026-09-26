@@ -137,6 +137,11 @@ data class WriteContext(
      * 只能由编排层 `writeWithDetails` 在写完主记录后注入。缺它写子项＝内部不变量被破坏，守卫拒。
      */
     val parentId: String? = null,
+    /**
+     * recalc 递归深度（M1-07 块4）：一次写触发的汇总重算沿父链上溯时逐层 +1。
+     * 缺省 0＝用户发起的原始写；recalc 内部再写目标字段时 +1。超上限（卡面 5）即停并告警，防失控。
+     */
+    val recalcDepth: Int = 0,
 )
 
 /**

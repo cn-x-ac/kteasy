@@ -15,8 +15,14 @@
  */
 package cn.x.ac.kteasy.core.write
 
+import cn.x.ac.kteasy.core.meta.DepAggOp
+import cn.x.ac.kteasy.core.meta.LogicalType
+import cn.x.ac.kteasy.core.meta.MdField
+import cn.x.ac.kteasy.core.meta.StorageKind
+import cn.x.ac.kteasy.core.schema.dialect.JsonPath
 import cn.x.ac.kteasy.core.schema.dialect.LogicalArea
 import cn.x.ac.kteasy.core.schema.dialect.SchemaProvider
+import cn.x.ac.kteasy.core.schema.dialect.ValueCast
 
 /**
  * 写入通道的 SQL 渲染器（图纸 04 阶段 9 的**语句形状**，纯函数、零方言字面量）。
@@ -143,6 +149,46 @@ class WriteSqlRenderer(
         srcCol: String,
         dstCol: String,
     ): String = "DELETE FROM $relTable WHERE $srcCol = :__src AND $dstCol IN (:__dsts)"
+
+    /**
+     * 汇总重算（recalc）聚合查询（M1-07 块4）：对 `srcObjectApi` 实体表按父键 `parentCol` 分组聚合来源字段。
+     * 软删行不计（`deleted_at IS NULL`）。来源字段按存储归属取表达式——真列直取、ext 走 [SchemaProvider] 的
+     * JSON 抽取 + 数值 cast（跨方言差异封在 provider 里，本类不写库名）。
+     *
+     * FIRST/LAST 非标准 SQL 聚合（需 `ORDER BY … LIMIT 1`，两库分叉），本块留桩拒，避免跨库猜——归后续方言件。
+     */
+    fun aggregateSql(
+        srcObjectApi: String,
+        sourceField: MdField,
+        agg: DepAggOp,
+        parentCol: String,
+    ): String {
+        val expr =
+            when (sourceField.storageKind) {
+                StorageKind.COLUMN -> safeId(sourceField.apiName)
+                else -> provider.json.extractTyped("ext", JsonPath.of(sourceField.apiName), numericCast(sourceField.logicalType)).sql
+            }
+        val fn =
+            when (agg) {
+                DepAggOp.SUM -> "SUM($expr)"
+                DepAggOp.COUNT -> "COUNT($expr)"
+                DepAggOp.COUNT_DISTINCT -> "COUNT(DISTINCT $expr)"
+                DepAggOp.AVG -> "AVG($expr)"
+                DepAggOp.MIN -> "MIN($expr)"
+                DepAggOp.MAX -> "MAX($expr)"
+                DepAggOp.FIRST, DepAggOp.LAST -> throw UnsupportedOperationException("FIRST/LAST 聚合需方言 ORDER BY+LIMIT 跨库实现，本块（M1-07 块4）留桩未做")
+            }
+        return "SELECT $fn FROM " + table(srcObjectApi) + " WHERE $parentCol = :__pid AND deleted_at IS NULL"
+    }
+
+    private fun numericCast(
+        type: LogicalType,
+    ): ValueCast =
+        when (type) {
+            LogicalType.NUMBER -> ValueCast.LONG
+            LogicalType.DECIMAL -> ValueCast.DOUBLE
+            else -> ValueCast.LONG
+        }
 
     /**
      * 参数名与 SQL 里的占位符一一对应：普通列为 `:v_<列名>`，`ext` 例外——它要经

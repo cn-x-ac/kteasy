@@ -15,6 +15,10 @@
  */
 package cn.x.ac.kteasy.core.write
 
+import cn.x.ac.kteasy.core.meta.DepAggOp
+import cn.x.ac.kteasy.core.meta.LogicalType
+import cn.x.ac.kteasy.core.meta.MdField
+import cn.x.ac.kteasy.core.meta.StorageKind
 import cn.x.ac.kteasy.core.schema.dialect.MySqlSchemaProvider
 import cn.x.ac.kteasy.core.schema.dialect.PostgresSchemaProvider
 import kotlin.test.Test
@@ -76,5 +80,34 @@ class WriteSqlRendererTest {
             assertFailsWith<IllegalArgumentException> { pg.insert(bad, linkedMapOf("id" to "1")) }
             assertFailsWith<IllegalArgumentException> { pg.insert("account", linkedMapOf(bad to "v")) }
         }
+    }
+
+    private val amountField =
+        MdField(
+            id = "F_amount",
+            objectId = "O1",
+            apiName = "amount",
+            label = "金额",
+            logicalType = LogicalType.DECIMAL,
+            storageKind = StorageKind.EXT,
+        )
+
+    @Test
+    fun `recalc 聚合 SQL 走方言 JSON 抽取且软删行不计`() {
+        val p = pg.aggregateSql("order_line", amountField, DepAggOp.SUM, "parent_id")
+        val m = my.aggregateSql("order_line", amountField, DepAggOp.SUM, "parent_id")
+        assertTrue(p.startsWith("SELECT SUM("), p)
+        assertTrue(p.endsWith("FROM app.order_line WHERE parent_id = :__pid AND deleted_at IS NULL"), p)
+        assertTrue(m.contains("e_order_line") && m.startsWith("SELECT SUM("), m)
+        // ext 值抽取各走方言：PG #>> 路径、MySQL JSON 抽取——表达式不同但都裹进 SUM()
+        assertTrue(p.contains("#>>"), "PG 走 jsonb 路径抽取：$p")
+        assertTrue(m.contains("JSON_EXTRACT") || m.contains("->"), "MySQL 走 JSON 抽取：$m")
+        assertTrue(pg.aggregateSql("order_line", amountField, DepAggOp.COUNT, "parent_id").contains("COUNT("))
+    }
+
+    @Test
+    fun `FIRST LAST 聚合留桩拒 不跨库猜`() {
+        assertFailsWith<UnsupportedOperationException> { pg.aggregateSql("order_line", amountField, DepAggOp.FIRST, "parent_id") }
+        assertFailsWith<UnsupportedOperationException> { my.aggregateSql("order_line", amountField, DepAggOp.LAST, "parent_id") }
     }
 }

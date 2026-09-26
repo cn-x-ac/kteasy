@@ -16,6 +16,7 @@
 package cn.x.ac.kteasy.server.write
 
 import cn.x.ac.kteasy.core.kernel.WallClock
+import cn.x.ac.kteasy.core.meta.LogicalType
 import cn.x.ac.kteasy.core.meta.MdField
 import cn.x.ac.kteasy.core.meta.StorageKind
 import cn.x.ac.kteasy.core.meta.SystemColumns
@@ -50,7 +51,17 @@ class RowValues(
         // 统一 toString() 而不是强转：块 5 双库 IT 第一次真连 PG 就把它炸出来了。
         val values = LinkedHashMap(codec.decode(raw[SystemColumns.EXT]?.toString()))
         fields.filter { it.storageKind == StorageKind.COLUMN }.forEach { f ->
-            columnValue(raw[f.apiName])?.let { values[f.apiName] = it }
+            // ANYREF 主列存 id、伴生 `_obj` 列存目标对象 api（写侧 3B 拆分）；读回重组 `hint:id`，
+            // 让对外值契约与 diff/无变化跳过保持对称（否则旧值 id、新值 hint:id 会每次假变更）。
+            if (f.logicalType == LogicalType.ANYREF) {
+                val id = raw[f.apiName]?.toString()
+                if (id != null) {
+                    val obj = raw["${f.apiName}_obj"]?.toString()
+                    values[f.apiName] = DraftValue.Text(if (obj != null) "$obj:$id" else id)
+                }
+            } else {
+                columnValue(raw[f.apiName])?.let { values[f.apiName] = it }
+            }
         }
         return WriteRow(
             id = raw[SystemColumns.ID] as String,

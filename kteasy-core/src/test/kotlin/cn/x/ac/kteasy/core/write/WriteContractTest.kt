@@ -152,6 +152,7 @@ class WriteContractTest {
                 "SYSTEM_COLUMN_READONLY",
                 "EXT_UNKNOWN_KEY",
                 "FIELD_DISABLED",
+                "ANYREF_OBJ_MISMATCH",
                 "OBJECT_DISABLED",
                 "CONFLICT_RETRY",
                 "LOCK_RETRY",

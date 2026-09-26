@@ -58,6 +58,7 @@ class WritePipelineTest {
         optionSetId: String? = null,
         dictId: String? = null,
         defaultJson: String? = null,
+        refAnyObjsJson: String? = null,
     ): MdField =
         MdField(
             id = "F_$api",
@@ -73,6 +74,7 @@ class WritePipelineTest {
             optionSetId = optionSetId,
             dictId = dictId,
             defaultJson = defaultJson,
+            refAnyObjsJson = refAnyObjsJson,
         )
 
     private fun graphOf(
@@ -547,5 +549,27 @@ class WritePipelineTest {
                 WritePipeline(newId = { "X".repeat(26) }).plan(WriteInput(g, ctxOf(), RecordDraft.of("qty" to DraftValue.Number("3"))))
             }
         assertEquals(ApiError.FORBIDDEN, ex.apiError)
+    }
+
+    // ---------- 块3B ANYREF 伴生列切分 + 归属软校验 ----------
+
+    @Test
+    fun `ANYREF 合法归属拆 id 列与 _obj 列`() {
+        val g = graphOf(field("ref", LogicalType.ANYREF, refAnyObjsJson = """["customer","order"]"""))
+        val created = plan(WriteInput(g, ctxOf(), RecordDraft.of("ref" to DraftValue.Text("customer:01ABCDEF"))))
+        assertEquals("01ABCDEF", created.columnBindings["ref"], "主列存 id（ID_LEN 容得下）")
+        assertEquals("customer", created.columnBindings["ref_obj"], "伴生列存目标对象 api")
+        assertEquals(null, created.extValues["ref"])
+    }
+
+    @Test
+    fun `ANYREF 目标对象不在允许集出 410 ANYREF_OBJ_MISMATCH`() {
+        val g = graphOf(field("ref", LogicalType.ANYREF, refAnyObjsJson = """["customer"]"""))
+        val ex = rejected(WriteInput(g, ctxOf(), RecordDraft.of("ref" to DraftValue.Text("ghost:01ABCDEF"))))
+        assertEquals(
+            WriteErrors.ID_ANYREF_OBJ_MISMATCH,
+            ((ex.data as Map<*, *>)["fields"] as List<*>).let { (it[0] as Map<*, *>)["error_id"] },
+        )
+        assertEquals(ApiError.INVALID_PARAM, ex.apiError, "改载荷给正确 hint 即可自救 → 410")
     }
 }

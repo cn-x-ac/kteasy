@@ -45,6 +45,14 @@ object WriteErrors {
 
     /** 字段存在但已停用（`enabled=false`）仍被写（P3：与未注册键同档，但回显信息不同）。 */
     const val ID_FIELD_DISABLED = "FIELD_DISABLED"
+
+    /**
+     * ANYREF 目标 id 不属于其「允许对象集」里的任何对象（悬空引用，M1-07 块 3B）。
+     *
+     * ANYREF 无真 FK（禁建外键），`_obj` 伴生列软校验是它唯一的引用完整性闸门；解析不到归属即拒。
+     * 承载 410（P2 判据：改载荷给一个正确 id 即可自救），**新增即动 `ALL_IDS`＝公开契约**（3B 用户拍板）。
+     */
+    const val ID_ANYREF_OBJ_MISMATCH = "ANYREF_OBJ_MISMATCH"
     const val ID_OBJECT_DISABLED = "OBJECT_DISABLED"
     const val ID_CONFLICT_RETRY = "CONFLICT_RETRY"
     const val ID_LOCK_RETRY = "LOCK_RETRY"
@@ -77,6 +85,7 @@ object WriteErrors {
             ID_FK_VIOLATION,
             ID_IN_USE,
             ID_FIELD_DISABLED,
+            ID_ANYREF_OBJ_MISMATCH,
             ID_AUTONUM_FAILED,
             ID_AUTOMATION_REJECTED,
         )
@@ -102,6 +111,7 @@ object WriteErrors {
             ID_OPTION_DOMAIN,
             ID_EXT_UNKNOWN_KEY,
             ID_FIELD_DISABLED,
+            ID_ANYREF_OBJ_MISMATCH,
         )
 
     /** 由符号名派生承载码的**唯一**入口（阶段 3/4 一律走这里，禁在调用点手选 [ApiError]）。 */

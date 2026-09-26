@@ -247,6 +247,25 @@ class WritePipeline(
             val v = derived[f.apiName] ?: continue
             if (f.storageKind == StorageKind.EXT) {
                 ext[f.apiName] = v
+            } else if (f.logicalType == LogicalType.ANYREF) {
+                // 3B：ANYREF 值 `{hint}:{id}` 拆两列——主列存 id（ID_LEN 容得下）、伴生 `_obj` 列存目标对象 api。
+                // 归属已在 domainViolation 校验；读回由 RowValues 从 (id, _obj) 重组，保持对外契约与 diff 对称。
+                when (v) {
+                    is DraftValue.Cleared -> {
+                        columns[f.apiName] = null
+                        columns["${f.apiName}_obj"] = null
+                    }
+
+                    is DraftValue.Text -> {
+                        val i = v.value.indexOf(':')
+                        columns["${f.apiName}_obj"] = v.value.substring(0, i)
+                        columns[f.apiName] = v.value.substring(i + 1)
+                    }
+
+                    else -> {
+                        jdbcOf(f, v)?.let { columns[f.apiName] = it }
+                    }
+                }
             } else {
                 jdbcOf(f, v)?.let { columns[f.apiName] = it }
             }
@@ -510,6 +529,20 @@ class WritePipeline(
                 items
                     .firstOrNull { it !in paths }
                     ?.let { WriteErrors.violation(field.apiName, WriteErrors.ID_OPTION_DOMAIN, "字段 [${field.apiName}] 的分类路径 [$it] 不存在") }
+            }
+
+            LogicalType.ANYREF -> {
+                // 值形 `{hint}:{id}`（Anyref.validate 已保证格式）。软校验：hint 必须 ∈ 字段允许对象集
+                // （ANYREF 无真 FK，这是它唯一的引用完整性闸门；3B 拍板新增 410 ANYREF_OBJ_MISMATCH）。
+                val allowed = MetadataValidator.parseStringArray(field.refAnyObjsJson) ?: emptyList()
+                val bad = items.firstOrNull { it.substringBefore(':', it).let { h -> h !in allowed } }
+                bad?.let {
+                    WriteErrors.violation(
+                        field.apiName,
+                        WriteErrors.ID_ANYREF_OBJ_MISMATCH,
+                        "字段 [${field.apiName}] 的引用 [$it] 目标对象不在允许集 $allowed 内",
+                    )
+                }
             }
 
             else -> {

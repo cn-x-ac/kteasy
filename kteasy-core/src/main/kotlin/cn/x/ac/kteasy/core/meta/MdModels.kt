@@ -116,8 +116,29 @@ data class MdOption(
 )
 
 /**
+ * recalc 聚合算子（模块图纸 01 §1 `md_dep.op`）。比查询期 `AggFn` 多 FIRST/LAST（recalc 回填语义）。
+ * 与 V5 迁移 `ck_md_dep_op` CHECK 一字不差；新增须同步迁移约束。
+ */
+enum class DepAggOp { SUM, COUNT, AVG, MIN, MAX, FIRST, LAST, COUNT_DISTINCT }
+
+/**
+ * 一条 recalc 依赖边（M1-07 块4，A4：rollup 一等元数据）。
+ *
+ * 语义：目标字段 [targetFieldId]（其 `write_policy=DERIVED`，服务端维护）＝对来源对象 [sourceObjectId]
+ * 的关联记录按 [sourceFieldId] 做 [op] 聚合，可选 [filterJson] 过滤。元数据保存时静态解析落 `md_dep`、做环检测。
+ */
+data class MdDep(
+    val id: String,
+    val targetFieldId: String,
+    val sourceObjectId: String,
+    val sourceFieldId: String,
+    val op: DepAggOp,
+    val filterJson: String? = null,
+)
+
+/**
  * 对象图谱（治理面 `GET /api/md/object/{api}/graph` 的载荷，图纸 01 §3）。
- * deps.out/in 恒空列表——recalc 依赖表 md_dep 归 M1-07 建表后填充（图纸已回写）。
+ * deps：[depOut]＝本对象字段作为汇总目标的边（依赖谁）、[depIn]＝别的字段依赖本对象字段的边。M1-07 块4 起由 md_dep 填充。
  */
 data class MetadataGraph(
     val objectMeta: MdObject,
@@ -127,6 +148,6 @@ data class MetadataGraph(
     val dictItems: List<MdDictItem>,
     val optionSets: List<MdOptionSet>,
     val options: List<MdOption>,
-    val depOut: List<Any> = emptyList(),
-    val depIn: List<Any> = emptyList(),
+    val depOut: List<MdDep> = emptyList(),
+    val depIn: List<MdDep> = emptyList(),
 )

@@ -22,6 +22,7 @@ import cn.x.ac.kteasy.core.kernel.MetadataChangedEvent
 import cn.x.ac.kteasy.core.kernel.Ulid
 import cn.x.ac.kteasy.core.meta.FieldWritePolicy
 import cn.x.ac.kteasy.core.meta.LogicalType
+import cn.x.ac.kteasy.core.meta.MdDep
 import cn.x.ac.kteasy.core.meta.MdField
 import cn.x.ac.kteasy.core.meta.MdObject
 import cn.x.ac.kteasy.core.meta.MetadataGraph
@@ -305,6 +306,7 @@ class MetadataService(
             dictItems = repository.listAllDictItems(),
             optionSets = repository.listAllOptionSets(),
             options = repository.listAllOptions(),
+            deps = repository.listAllDeps(),
         )
 
     fun buildGraph(
@@ -317,6 +319,7 @@ class MetadataService(
         val fields = snapshot.fields.filter { it.objectId == obj.id }
         val dictIds = fields.mapNotNull { it.dictId }.toSet()
         val setIds = fields.mapNotNull { it.optionSetId }.toSet()
+        val fieldIds = fields.map { it.id }.toSet()
         return MetadataGraph(
             objectMeta = obj,
             parent = obj.parentObjectId?.let { pid -> snapshot.objects.firstOrNull { it.id == pid } },
@@ -325,6 +328,8 @@ class MetadataService(
             dictItems = snapshot.dictItems.filter { it.dictId in dictIds },
             optionSets = snapshot.optionSets.filter { it.id in setIds },
             options = snapshot.options.filter { it.setId in setIds },
+            depOut = snapshot.deps.filter { it.targetFieldId in fieldIds },
+            depIn = snapshot.deps.filter { it.sourceObjectId == obj.id },
         )
     }
 
@@ -441,4 +446,5 @@ data class MetadataSnapshot(
     val dictItems: List<cn.x.ac.kteasy.core.meta.MdDictItem>,
     val optionSets: List<cn.x.ac.kteasy.core.meta.MdOptionSet>,
     val options: List<cn.x.ac.kteasy.core.meta.MdOption>,
+    val deps: List<MdDep> = emptyList(),
 )

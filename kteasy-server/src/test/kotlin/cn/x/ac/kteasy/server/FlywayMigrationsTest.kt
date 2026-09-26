@@ -157,6 +157,22 @@ class FlywayMigrationsTest {
         }
     }
 
+    /** 块4 md_dep：V5 迁移成功；md 区、四标识符列钉 binary、filter_json 属 JSON 族、列集冻结。 */
+    @Test
+    fun `M1-07 块4 md_dep 建表 binary 落区正确`() {
+        val pg = context.dialect == Dialect.POSTGRESQL
+        val bin = if (pg) "C" else "utf8mb4_bin"
+        val applied = flyway.info().applied().associate { (it.version?.version ?: "?") to it.state.name }
+        assertThat(applied["5"]).`as`("V5 迁移成功").isEqualTo("SUCCESS")
+        assertThat(existsIn("md", "md_dep")).`as`("md.md_dep 应存在").isTrue()
+        listOf("id", "target_field_id", "source_object_id", "source_field_id").forEach { c ->
+            assertThat(collationIn("md", "md_dep", c)).`as`("md_dep.$c binary").isEqualTo(bin)
+        }
+        val cols = columns("md_dep", if (pg) "md" else null)
+        assertThat(cols.keys).containsExactlyInAnyOrder("id", "target_field_id", "source_object_id", "source_field_id", "op", "filter_json", "created_at", "updated_at")
+        assertThat(cols["filter_json"]).`as`("filter_json 属 JSON 族").isIn(setOf(Types.OTHER, Types.LONGVARCHAR, Types.VARCHAR, Types.SQLXML))
+    }
+
     /** 压扁后终态 schema dump（供评审；仅当设了 KTEASY_SCHEMA_DUMP 环境变量才落盘，走 fork 继承的 env 而非 -D）。 */
     @Test
     fun `压扁后终态 schema dump`() {

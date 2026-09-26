@@ -17,8 +17,10 @@ package cn.x.ac.kteasy.server.md
 
 import cn.x.ac.kteasy.core.kernel.ApiError
 import cn.x.ac.kteasy.core.kernel.KnownKteasyException
+import cn.x.ac.kteasy.core.meta.DepAggOp
 import cn.x.ac.kteasy.core.meta.FieldWritePolicy
 import cn.x.ac.kteasy.core.meta.LogicalType
+import cn.x.ac.kteasy.core.meta.MdDep
 import cn.x.ac.kteasy.core.meta.MdDict
 import cn.x.ac.kteasy.core.meta.MdDictItem
 import cn.x.ac.kteasy.core.meta.MdField
@@ -332,6 +334,43 @@ class MetadataRepository(
         )
 
     fun listAllOptions(): List<MdOption> = query("SELECT * FROM ${table("md_option")} ORDER BY set_id, seq", emptyMap(), optionMapper)
+
+    /** recalc 依赖边全量（M1-07 块4，喂快照/图谱；保存期环检测也用它）。jsonb 回读取原文（PG 给 PGobject，getString 即 JSON 文本）。 */
+    fun listAllDeps(): List<MdDep> =
+        query(
+            "SELECT * FROM ${table("md_dep")} ORDER BY target_field_id",
+            emptyMap(),
+            RowMapper { rs, _ ->
+                MdDep(
+                    id = rs.getString("id"),
+                    targetFieldId = rs.getString("target_field_id"),
+                    sourceObjectId = rs.getString("source_object_id"),
+                    sourceFieldId = rs.getString("source_field_id"),
+                    op = DepAggOp.valueOf(rs.getString("op")),
+                    filterJson = rs.getString("filter_json"),
+                )
+            },
+        )
+
+    /** 按目标字段查其依赖边（recalc 反查、环检测局部图）。 */
+    fun findDepsByTargets(fieldIds: Collection<String>): List<MdDep> =
+        if (fieldIds.isEmpty()) {
+            emptyList()
+        } else {
+            query("SELECT * FROM ${table("md_dep")} WHERE target_field_id IN (:ids)", mapOf("ids" to fieldIds.toList()), depMapper())
+        }
+
+    private fun depMapper() =
+        RowMapper { rs, _ ->
+            MdDep(
+                id = rs.getString("id"),
+                targetFieldId = rs.getString("target_field_id"),
+                sourceObjectId = rs.getString("source_object_id"),
+                sourceFieldId = rs.getString("source_field_id"),
+                op = DepAggOp.valueOf(rs.getString("op")),
+                filterJson = rs.getString("filter_json"),
+            )
+        }
 
     fun findDictById(id: String): MdDict? =
         queryOne(

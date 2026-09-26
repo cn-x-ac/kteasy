@@ -128,4 +128,5 @@ jobs:
             --tests "cn.x.ac.kteasy.server.write.AutonumSeqIT" \
             --tests "cn.x.ac.kteasy.server.write.DetailsIT" \
             --tests "cn.x.ac.kteasy.server.write.RelationIT" \
-            --tests "cn.x.ac.kteasy.server.write.AnyrefIT"
+            --tests "cn.x.ac.kteasy.server.write.AnyrefIT" \
+            --tests "cn.x.ac.kteasy.server.write.RecalcIT"

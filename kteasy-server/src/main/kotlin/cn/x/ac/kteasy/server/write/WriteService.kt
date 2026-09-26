@@ -108,7 +108,7 @@ class WriteService(
             try {
                 val seeds = ArrayList<Pair<String, String>>()
                 val parent = writeLocked(ctx, pgraph, draft.copy(details = emptyMap()))
-                if (parent.diff.isNotEmpty()) seeds += ctx.objectApi to parent.id
+                if (seedsWrite(parent)) seeds += ctx.objectApi to parent.id
                 if (draft.details.isNotEmpty()) seeds += writeChildren(ctx, parent.id, draft.details)
                 // recalc 只在最外层用户写触发（内部再写 recalcDepth>0 不再递归，由本迭代逐层驱动）；
                 // 仍在父锁与同一事务内，保证汇总与源写原子一致。
@@ -133,9 +133,10 @@ class WriteService(
             val updateById = diff.updates.associateBy { it.id!! }
             val deleteIds = diff.deletes.toSet()
             for (id in (updateById.keys + deleteIds).sorted()) {
-                val childCtx = ctx.copy(objectApi = childApi, parentId = parentId, recordId = id, intent = if (id in deleteIds) WriteIntent.DELETE else WriteIntent.UPSERT, expectedVersion = null)
+                val del = id in deleteIds
+                val childCtx = ctx.copy(objectApi = childApi, parentId = parentId, recordId = id, intent = if (del) WriteIntent.DELETE else WriteIntent.UPSERT, expectedVersion = null)
                 val r = doWrite(childCtx, updateById[id]?.let { RecordDraft(it.fields) } ?: RecordDraft())
-                if (r.diff.isNotEmpty() || id in deleteIds) changed += childApi to id
+                if (seedsWrite(r) || del) changed += childApi to id
             }
             for (r in diff.creates) {
                 val childCtx = ctx.copy(objectApi = childApi, parentId = parentId, recordId = null, intent = WriteIntent.UPSERT, expectedVersion = null)
@@ -145,6 +146,9 @@ class WriteService(
         }
         return changed
     }
+
+    /** 该写是否应作为 recalc 种子：字段有变更，或新建/软删/恢复（这些改变父聚合的存在性，diff 可能空）。 */
+    private fun seedsWrite(r: WriteResult): Boolean = r.diff.isNotEmpty() || r.kind == WriteKind.CREATED || r.kind == WriteKind.DELETED || r.kind == WriteKind.RESTORED
 
     private fun existingChildIds(
         childApi: String,
@@ -191,14 +195,19 @@ class WriteService(
             for (job in jobs.values.sortedWith(compareBy({ it.targetRecordId }, { it.targetFieldApi }))) {
                 val sql = renderer.aggregateSql(job.sourceObjectApi, job.sourceField, job.op, "parent_id")
                 val agg = jdbc.queryForObject(sql, MapSqlParameterSource(mapOf("__pid" to job.targetRecordId)), java.math.BigDecimal::class.java)
-                val draft =
-                    if (agg == null) {
-                        RecordDraft(values = mapOf(job.targetFieldApi to DraftValue.Cleared))
-                    } else {
-                        RecordDraft(values = mapOf(job.targetFieldApi to DraftValue.Number(agg.toPlainString())))
-                    }
-                val targetCtx = ctx.copy(objectApi = job.targetObjectApi, recordId = job.targetRecordId, intent = WriteIntent.UPSERT, source = WriteSource.SYSTEM, expectedVersion = null, parentId = null, recalcDepth = depth)
-                val r = doWrite(targetCtx, draft)
+                val injected = if (agg == null) DraftValue.Cleared else DraftValue.Number(agg.toPlainString())
+                val targetCtx =
+                    ctx.copy(
+                        objectApi = job.targetObjectApi,
+                        recordId = job.targetRecordId,
+                        intent = WriteIntent.UPSERT,
+                        source = WriteSource.SYSTEM,
+                        expectedVersion = null,
+                        parentId = null,
+                        recalcDepth = depth,
+                        serverDerived = mapOf(job.targetFieldApi to injected),
+                    )
+                val r = doWrite(targetCtx, RecordDraft())
                 if (r.diff.isNotEmpty()) next += job.targetObjectApi to job.targetRecordId
             }
             frontier = next

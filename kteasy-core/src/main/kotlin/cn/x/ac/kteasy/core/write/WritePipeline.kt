@@ -189,6 +189,9 @@ class WritePipeline(
                 }
             }
         }
+        // recalc 服务端注入值（块4）：非调用方来源，直接并入派生（新建/更新皆可），required 裁决前生效。
+        for ((k, v) in input.ctx.serverDerived) derived[k] = v
+
         requiredViolations(input, derived, creating).let { if (it.isNotEmpty()) throw WriteErrors.rejected(it) }
 
         // ---- 阶段 7 diff（喂 M5 审计与 M3「结果一致跳过」） ----

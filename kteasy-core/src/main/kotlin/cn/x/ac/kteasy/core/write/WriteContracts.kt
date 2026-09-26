@@ -142,6 +142,13 @@ data class WriteContext(
      * 缺省 0＝用户发起的原始写；recalc 内部再写目标字段时 +1。超上限（卡面 5）即停并告警，防失控。
      */
     val recalcDepth: Int = 0,
+    /**
+     * 服务端注入值（M1-07 块4 recalc）：字段 api → 值，经阶段 5 并入派生、按**非调用方来源**处理。
+     *
+     * `DERIVED` 写策略对所有来源（含 `SYSTEM`）都拒"调用方在 `values` 里提供值"（P3）；recalc 回写汇总字段
+     * 属服务端派生，走此通道而非 `values`，才不被阶段 4 误拒。
+     */
+    val serverDerived: Map<String, DraftValue> = emptyMap(),
 )
 
 /**

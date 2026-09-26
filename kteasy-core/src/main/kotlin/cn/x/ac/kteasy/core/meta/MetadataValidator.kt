@@ -214,11 +214,6 @@ object MetadataValidator {
         }
 
     /**
-     * 解析字符串数组的原始 JSON 串（`["a","b"]`）。刻意不引 JSON 库：
-     * 该列只允许字符串数组，容错解析足以支撑校验；结构化消费归 M1-04/M1-05 的注册表与 EQL 层。
-     * 非 JSON 数组形状返回 null（视为未填）。
-     */
-    /**
      * recalc 依赖图环检测（M1-07 块4 单元②；卡面 §3「有环拒存」、图纸 01 §39 保存校验链一环）。
      *
      * 节点＝字段 id，"depends-on" 有向边 `target ← source`（目标字段聚合自来源字段）。DFS 三色找环，
@@ -261,6 +256,11 @@ object MetadataValidator {
         return cycles
     }
 
+    /**
+     * 解析字符串数组的原始 JSON 串（`["a","b"]`）。刻意不引 JSON 库：
+     * 该列只允许字符串数组，容错解析足以支撑校验；结构化消费归 M1-04/M1-05 的注册表与 EQL 层。
+     * 非 JSON 数组形状返回 null（视为未填）。
+     */
     fun parseStringArray(raw: String?): List<String>? {
         if (raw.isNullOrBlank()) return null
         val s = raw.trim()

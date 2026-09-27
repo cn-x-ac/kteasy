@@ -86,6 +86,15 @@ jobs:
       - name: 千子项一轮创建 + 一轮差量（断言只断正确性，耗时落盘）
         run: ./gradlew --no-daemon :kteasy-server:test --tests "cn.x.ac.kteasy.server.write.DetailsPerfIT"
 
+      # 自证门禁：门控变量漏设会让整个测试类被跳过，而"全部 disabled"在 Gradle 侧究竟红还是绿
+      # 取决于版本对 JUnit 条件的处理，不可依赖。落盘件存在且非空是把「真跑过」变成确定性判定的唯一办法。
+      - name: 自证门禁 · 落盘件必须存在
+        run: |
+          test -s kteasy-server/build/perf/details-perf.txt || {
+            echo "::error::无 details-perf.txt 落盘——千子项基线未真正执行（查 KTEASY_PERF 是否传入）"
+            exit 1
+          }
+
       - name: 基线数字写进任务摘要
         if: always()
         run: |
@@ -165,3 +174,29 @@ jobs:
       - name: MySQL 大表加列走 INSTANT 探测（仅 mysql 方言跑）
         if: matrix.dialect == 'mysql'
         run: ./gradlew --no-daemon :kteasy-server:test --tests "cn.x.ac.kteasy.server.schema.InstantPathIT"
+
+      # 同 details-perf：重件吃的是 runner 的 IO 与时间，若因门控未生效而空跑一遍绿灯，代价是双份的。
+      - name: 自证门禁 · 落盘件必须存在
+        run: |
+          test -s kteasy-server/build/perf/perf-smoke.txt || {
+            echo "::error::无 perf-smoke.txt 落盘——50w 灌数未真正执行（查 KTEASY_PERF 是否传入）"
+            exit 1
+          }
+
+      - name: 重件数字写进任务摘要
+        if: always()
+        run: |
+          {
+            echo "## 50w 重件 · ${{ matrix.dialect }}"
+            echo '```'
+            cat kteasy-server/build/perf/perf-smoke.txt 2>/dev/null || echo "（无落盘结果）"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传重件落盘件
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-heavy-${{ matrix.dialect }}-${{ github.run_number }}
+          path: kteasy-server/build/perf/
+          if-no-files-found: ignore

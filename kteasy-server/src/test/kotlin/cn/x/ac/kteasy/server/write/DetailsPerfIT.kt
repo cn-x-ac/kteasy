@@ -84,6 +84,12 @@ class DetailsPerfIT {
 
     private fun jdbc() = JdbcTemplate(dataSource)
 
+    /** 库地址取连接的 metadata URL（不读 env）：CI service 库不设 `KTEASY_DB_HOST`，读 env 会落 `?:?` 让数字失去判读环境。 */
+    private fun dbEndpoint(): String =
+        runCatching { dataSource.connection.use { it.metaData.url } }
+            .getOrDefault("?")
+            .substringBefore("?") // 去查询串，避免把凭据类参数写进落盘件
+
     private fun ctx(
         objectApi: String,
         recordId: String? = null,
@@ -181,10 +187,10 @@ class DetailsPerfIT {
         out
             .appendText(
                 """
-                [$stamp] dialect=$dialect host=${System.getenv("KTEASY_DB_HOST") ?: "?"}:${System.getenv("KTEASY_DB_PORT") ?: "?"} rows=$rows
+                [$stamp] dialect=$dialect db=${dbEndpoint()} rows=$rows
                   轮1 新建 $rows 子项 = ${createMs}ms
                   轮2 差量(改$updated/删$deleted/增$added，共 ${updated + added} 行载荷) = ${diffMs}ms
-                  预算 ⟨1000 子项 <3000ms⟩ 判定：轮1 ${verdict(createMs)} / 轮2 ${verdict(diffMs)}
+                  预算 ⟨<3000ms⟩ 判定（预算按卡面的 1000 子项定义；本跑规模 rows=$rows，规模≠1000 时此行仅供参照）：轮1 ${verdict(createMs)} / 轮2 ${verdict(diffMs)}
 
                 """.trimIndent() + "\n",
             )

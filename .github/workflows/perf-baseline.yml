@@ -1,0 +1,167 @@
+name: perf-baseline
+
+# 性能基线件【框架文档 02】§7 L5 · 承接【框架文档 03】M1 合闸的两项挂账（千子项 <3s、50w 行）。
+#
+# 刻意不挂 pull_request：千行/50w 级灌数会把每次 PR 拖成十分钟级，且基线要的是趋势不是每提交一红点。
+# 触发＝每晚定序（取到稳定的历史序列）＋手动（改批量写路径后自己拉一次对照）。
+#
+# 为什么判定环境＝CI 而不是本机：service 容器与应用同宿主，单次往返亚毫秒，正是 ⟨<3s⟩ 隐含的
+# 「应用与 DB 同机房」前提。跨网（Overlay/VPN）开发机上每行 2–3 次串行往返会被链路放大 2–3 倍
+# 且伴随丢包，那边测出的墙钟无论达标与否都不作判定，只作「每行往返成本」的相对证据。
+on:
+  workflow_dispatch:
+    inputs:
+      detail_rows:
+        description: "子项基线规模（DetailsPerfIT 的行数）"
+        required: false
+        default: "1000"
+      run_heavy:
+        description: "是否同时跑重件（50w 灌数 PerfSmokeIT / InstantPathIT）"
+        type: boolean
+        required: false
+        default: false
+  schedule:
+    - cron: "0 18 * * *" # UTC 18:00 ＝ 澳门 02:00
+
+permissions:
+  contents: read
+
+# 定序与手动撞车时排队而非并发：两个 job 都会在同一 runner 上建同名临时对象表。
+concurrency:
+  group: perf-baseline
+  cancel-in-progress: false
+
+jobs:
+  details-perf:
+    name: 千子项批写基线（${{ matrix.dialect }}）
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        dialect: [pg, mysql]
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: kteasy
+          POSTGRES_USER: kteasy
+          POSTGRES_PASSWORD: kteasy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kteasy -d kteasy"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+      mysql:
+        image: mysql:9.7
+        env:
+          MYSQL_DATABASE: kteasy
+          MYSQL_USER: kteasy
+          MYSQL_PASSWORD: kteasy
+          MYSQL_ROOT_PASSWORD: rootpass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -prootpass"
+          --health-interval 5s --health-timeout 5s --health-retries 24
+    env:
+      SPRING_PROFILES_ACTIVE: ${{ matrix.dialect }}
+      KTEASY_IT_DB: "true"
+      KTEASY_PERF: "true"
+      KTEASY_DETAIL_ROWS: ${{ github.event.inputs.detail_rows || '1000' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+
+      - name: 千子项一轮创建 + 一轮差量（断言只断正确性，耗时落盘）
+        run: ./gradlew --no-daemon :kteasy-server:test --tests "cn.x.ac.kteasy.server.write.DetailsPerfIT"
+
+      - name: 基线数字写进任务摘要
+        if: always()
+        run: |
+          {
+            echo "## 子项批写基线 · ${{ matrix.dialect }}"
+            echo '```'
+            cat kteasy-server/build/perf/details-perf.txt 2>/dev/null || echo "（无落盘结果，见测试日志）"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传基线落盘件（趋势对照用）
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-details-${{ matrix.dialect }}-${{ github.run_number }}
+          path: kteasy-server/build/perf/
+          if-no-files-found: ignore
+
+  # 重件＝50w 行灌数路径，只在显式勾选时跑：单机 service 库上它吃的是 runner 的 IO 与时间，
+  # 不进定序序列，避免每晚一次把私有仓库的执行分钟数烧光。
+  heavy-perf:
+    name: 50w 重性能件（${{ matrix.dialect }}）
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        dialect: [pg, mysql]
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: kteasy
+          POSTGRES_USER: kteasy
+          POSTGRES_PASSWORD: kteasy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kteasy -d kteasy"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+      mysql:
+        image: mysql:9.7
+        env:
+          MYSQL_DATABASE: kteasy
+          MYSQL_USER: kteasy
+          MYSQL_PASSWORD: kteasy
+          MYSQL_ROOT_PASSWORD: rootpass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -prootpass"
+          --health-interval 5s --health-timeout 5s --health-retries 24
+    env:
+      SPRING_PROFILES_ACTIVE: ${{ matrix.dialect }}
+      KTEASY_IT_DB: "true"
+      KTEASY_PERF: "true"
+      KTEASY_SEED_ROWS: "500000"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+
+      # 服务端生成（generate_series / 递归 CTE），数据不过链路，跨网开发机上这一步同样是便宜的。
+      - name: 50w 行连加 20 标量 · 零 DDL · 并行读写不中断
+        run: ./gradlew --no-daemon :kteasy-server:test --tests "cn.x.ac.kteasy.server.schema.PerfSmokeIT"
+
+      - name: MySQL 大表加列走 INSTANT 探测（仅 mysql 方言跑）
+        if: matrix.dialect == 'mysql'
+        run: ./gradlew --no-daemon :kteasy-server:test --tests "cn.x.ac.kteasy.server.schema.InstantPathIT"

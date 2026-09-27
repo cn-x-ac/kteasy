@@ -173,6 +173,41 @@ class FlywayMigrationsTest {
         assertThat(cols["filter_json"]).`as`("filter_json 属 JSON 族").isIn(setOf(Types.OTHER, Types.LONGVARCHAR, Types.VARCHAR, Types.SQLXML))
     }
 
+    /** M2a-01 md_dept：V6 迁移成功；md 区、四标识符列钉 binary、path 保持表默认、列集冻结（10 列）。 */
+    @Test
+    fun `M2a-01 md_dept 建表 binary 落区正确`() {
+        val pg = context.dialect == Dialect.POSTGRESQL
+        val bin = if (pg) "C" else "utf8mb4_bin"
+        val applied = flyway.info().applied().associate { (it.version?.version ?: "?") to it.state.name }
+        assertThat(applied["6"]).`as`("V6 迁移成功").isEqualTo("SUCCESS")
+        assertThat(existsIn("md", "md_dept")).`as`("md.md_dept 应存在").isTrue()
+        // 标识符语义的四列钉 binary：id 与全部引用列（parent_id/code/leader_user_id）。
+        // code 也钉——它是"按 code 解析部门"的匹配键，ci 排序会让两个仅大小写不同的 code 判等（M2d-06 的歧义即该行失败判据依赖这条）。
+        listOf("id", "parent_id", "code", "leader_user_id").forEach { c ->
+            assertThat(collationIn("md", "md_dept", c)).`as`("md_dept.$c binary").isEqualTo(bin)
+        }
+        val cols = columns("md_dept", if (pg) "md" else null)
+        assertThat(cols.keys).containsExactlyInAnyOrder(
+            "id",
+            "parent_id",
+            "code",
+            "name",
+            "path",
+            "seq",
+            "leader_user_id",
+            "enabled",
+            "created_at",
+            "updated_at",
+        )
+        assertThat(cols["seq"]).`as`("seq 为整型族（path 段来源）").isIn(setOf(Types.INTEGER, Types.SMALLINT, Types.BIGINT))
+        assertThat(cols["enabled"]).`as`("enabled 为布尔族").isIn(setOf(Types.BOOLEAN, Types.BIT, Types.SMALLINT))
+        // path 与 V3 的 md_dict_item.path 同口径：非标识符列不吃 binary（前缀 LIKE 的跨库等价性交给 DeptTreeIT 真连证）。
+        if (!pg) {
+            assertThat(collationIn("md", "md_dept", "path")).`as`("path 保持表默认排序规则").isEqualTo("utf8mb4_0900_ai_ci")
+            assertThat(collationIn("md", "md_dept", "name")).`as`("name 保持表默认排序规则").isEqualTo("utf8mb4_0900_ai_ci")
+        }
+    }
+
     /** 压扁后终态 schema dump（供评审；仅当设了 KTEASY_SCHEMA_DUMP 环境变量才落盘，走 fork 继承的 env 而非 -D）。 */
     @Test
     fun `压扁后终态 schema dump`() {

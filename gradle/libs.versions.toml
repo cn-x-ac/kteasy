@@ -17,7 +17,7 @@ archunit = "1.5.0"
 # 拼音检索码（M1-04）：TinyPinyin 核心（Apache-2.0、自带拼音表、类包名 com.github.promeg.pinyinhelper.Pinyin）。
 # 取 Maven Central 上的 io.github.biezhi:TinyPinyin（promeg 正版的 Central 镜像，含 java 核心 + ahocorasick(Apache) 传递；
 # pinyin4j 仅 test scope 不进产物）。promeg 官方仓库只在 JitPack 且该 tag 仅产出 Android 词库、无 java 核心 jar，故弃 JitPack。
-tinyPinyin = "2.0.3.RELEASE"
+tinyPinyin = "2.0.3"
 
 [libraries]
 # --- build-logic 约定插件编译期需要的插件载体（模块内不引用） ---

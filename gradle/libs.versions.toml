@@ -10,7 +10,7 @@
 kotlin = "2.4.20"
 springBoot = "4.1.1"
 # 合规骨架：spotless 强制【规格】§1.4 版权头 + ktlint 统一 Kotlin 风格
-spotless = "8.10.2"
+spotless = "8.10.3"
 ktlint = "1.8.0"
 # 架构门禁（M1-02 红线④⑤）：把「方言只在 core.schema.dialect、业务层不触 SQL 字面量/具体方言类」变成 CI 断言
 archunit = "1.5.0"
